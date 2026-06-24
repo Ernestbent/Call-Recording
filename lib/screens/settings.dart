@@ -165,7 +165,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             child: TextField(
               controller: _apiUrlController,
               decoration: const InputDecoration(
-                hintText: 'https://api.yourdomain.com',
+                hintText: 'https://127.0.0.1:8002/api/upload/',
                 border: InputBorder.none,
                 hintStyle: TextStyle(
                   fontSize: 14,
