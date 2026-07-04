@@ -82,7 +82,10 @@ class CallRecorderService : Service() {
     private fun startRecording() {
         if (isRecording) return
 
-        val file = File(getExternalFilesDir(null), "call_${System.currentTimeMillis()}.m4a")
+        val recordingsDir = File(filesDir.parentFile, "app_flutter/recordings").apply {
+            mkdirs()
+        }
+        val file = File(recordingsDir, "call_${System.currentTimeMillis()}.m4a")
         outputPath = file.absolutePath
 
         recorder = MediaRecorder().apply {

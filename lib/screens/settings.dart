@@ -1,17 +1,18 @@
 import 'package:flutter/material.dart';
+import 'package:calls_recording/services/customer_call_store.dart';
+import 'package:calls_recording/screens/home_screen.dart';
 import 'package:calls_recording/widgets/custom_bottom_nav.dart';
 
 class SettingsScreen extends StatefulWidget {
-  const SettingsScreen({super.key});
+  final CustomerCallStore appState;
+
+  const SettingsScreen({super.key, required this.appState});
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  int currentIndex = 2; // Set to 2 for Settings tab
-
-  // Settings state variables
   bool _autoRecordCalls = true;
   bool _darkMode = false;
   String _apiUrl = '';
@@ -52,7 +53,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, color: Color(0xFF554B42)),
           onPressed: () {
-            Navigator.pop(context);
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(
+                builder: (context) => HomeScreen(appState: widget.appState),
+              ),
+            );
           },
         ),
       ),
@@ -114,21 +120,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
       ),
       bottomNavigationBar: CustomBottomNav(
-        currentIndex: currentIndex,
-        onTap: (index) {
-          if (index == 0) {
-            Navigator.pop(context);
-          } else if (index == 1) {
-            // Navigate to Sessions
-            Navigator.pop(context);
-          }
-          // If index == 2 (Settings), we're already here
-        },
+        currentIndex: 3,
+        appState: widget.appState,
+        onTap: (_) {},
       ),
     );
   }
 
-  // Section Header
   Widget _buildSectionHeader(String title) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
@@ -144,7 +142,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  // API URL Field with Placeholder
   Widget _buildApiUrlField() {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
@@ -155,11 +152,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
       child: Row(
         children: [
-          const Icon(
-            Icons.link,
-            color: Color(0xFFE17C0F),
-            size: 20,
-          ),
+          const Icon(Icons.link, color: Color(0xFFE17C0F), size: 20),
           const SizedBox(width: 12),
           Expanded(
             child: TextField(
@@ -167,15 +160,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
               decoration: const InputDecoration(
                 hintText: 'https://127.0.0.1:8002/api/upload/',
                 border: InputBorder.none,
-                hintStyle: TextStyle(
-                  fontSize: 14,
-                  color: Colors.grey,
-                ),
+                hintStyle: TextStyle(fontSize: 14, color: Colors.grey),
               ),
-              style: const TextStyle(
-                fontSize: 14,
-                color: Color(0xFF554B42),
-              ),
+              style: const TextStyle(fontSize: 14, color: Color(0xFF554B42)),
               onChanged: (value) {
                 setState(() {
                   _apiUrl = value;
@@ -190,7 +177,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
               size: 20,
             ),
             onPressed: () {
-              // Save API URL
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(
                   content: Text('API URL saved successfully!'),
@@ -205,7 +191,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  // Switch Tile
   Widget _buildSwitchTile({
     required String title,
     required String subtitle,
@@ -237,10 +222,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 const SizedBox(height: 2),
                 Text(
                   subtitle,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Colors.grey[500],
-                  ),
+                  style: TextStyle(fontSize: 12, color: Colors.grey[500]),
                 ),
               ],
             ),
@@ -248,8 +230,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
           Switch(
             value: value,
             onChanged: onChanged,
-            activeColor: const Color(0xFFE17C0F),
-            activeTrackColor: const Color(0xFFE17C0F).withOpacity(0.3),
+            activeThumbColor: const Color(0xFFE17C0F),
+            activeTrackColor: const Color(0xFFE17C0F).withValues(alpha: 0.3),
           ),
         ],
       ),

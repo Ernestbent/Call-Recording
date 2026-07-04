@@ -1,18 +1,43 @@
+import 'package:calls_recording/models/customer_contact.dart';
+import 'package:calls_recording/screens/home_screen.dart';
+import 'package:calls_recording/services/customer_call_store.dart';
+import 'package:calls_recording/widgets/custom_bottom_nav.dart';
 import 'package:flutter/material.dart';
-import 'package:calls_recording/widgets/custom_bottom_nav.dart'; // Import the navbar
+
+enum _SessionFilter { all, pending, uploaded }
 
 class SessionsScreen extends StatefulWidget {
-  const SessionsScreen({super.key});
+  final CustomerCallStore appState;
+
+  const SessionsScreen({super.key, required this.appState});
 
   @override
   State<SessionsScreen> createState() => _SessionsScreenState();
 }
 
 class _SessionsScreenState extends State<SessionsScreen> {
-  int currentIndex = 1; // Set to 1 for Sessions tab
+  _SessionFilter _selectedFilter = _SessionFilter.all;
 
   @override
   Widget build(BuildContext context) {
+    final sessions = _buildSessionItems(widget.appState.customers);
+    final filteredSessions = switch (_selectedFilter) {
+      _SessionFilter.all => sessions,
+      _SessionFilter.pending => sessions
+          .where((session) => session.status == _SessionStatus.pending)
+          .toList(),
+      _SessionFilter.uploaded => sessions
+          .where((session) => session.status == _SessionStatus.uploaded)
+          .toList(),
+    };
+
+    final pendingCount = sessions
+        .where((session) => session.status == _SessionStatus.pending)
+        .length;
+    final uploadedCount = sessions
+        .where((session) => session.status == _SessionStatus.uploaded)
+        .length;
+
     return Scaffold(
       appBar: AppBar(
         centerTitle: true,
@@ -30,11 +55,15 @@ class _SessionsScreenState extends State<SessionsScreen> {
           preferredSize: Size.fromHeight(1),
           child: Divider(color: Color(0xFFD9D9D9), thickness: 1, height: 1),
         ),
-        // Add back button to return to Home
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Color(0xFF554B42)),
+          icon: const Icon(Icons.arrow_back_rounded, color: Color(0xFF554B42)),
           onPressed: () {
-            Navigator.pop(context);
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(
+                builder: (context) => HomeScreen(appState: widget.appState),
+              ),
+            );
           },
         ),
       ),
@@ -43,241 +72,293 @@ class _SessionsScreenState extends State<SessionsScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Filter buttons - evenly spaced
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            Wrap(
+              spacing: 10,
+              runSpacing: 10,
               children: [
-                // All button
-                Expanded(
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 8,
-                    ),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFE17C0F),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: const Center(
-                      child: Text(
-                        'All (10)',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 14,
-                          fontFamily: 'Open Sans',
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                  ),
+                _FilterChipButton(
+                  label: 'All (${sessions.length})',
+                  selected: _selectedFilter == _SessionFilter.all,
+                  onTap: () => setState(() => _selectedFilter = _SessionFilter.all),
                 ),
-                const SizedBox(width: 10),
-                // Pending button
-                Expanded(
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 8,
-                    ),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF554B42),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: const Center(
-                      child: Text(
-                        'Pending (4)',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 14,
-                          fontFamily: 'Open Sans',
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                  ),
+                _FilterChipButton(
+                  label: 'Pending ($pendingCount)',
+                  selected: _selectedFilter == _SessionFilter.pending,
+                  onTap: () =>
+                      setState(() => _selectedFilter = _SessionFilter.pending),
                 ),
-                const SizedBox(width: 10),
-                // Uploaded button
-                Expanded(
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 8,
-                    ),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF554B42),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: const Center(
-                      child: Text(
-                        'Uploaded (6)',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 14,
-                          fontFamily: 'Open Sans',
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                  ),
+                _FilterChipButton(
+                  label: 'Uploaded ($uploadedCount)',
+                  selected: _selectedFilter == _SessionFilter.uploaded,
+                  onTap: () =>
+                      setState(() => _selectedFilter = _SessionFilter.uploaded),
                 ),
               ],
             ),
-
             const SizedBox(height: 20),
-
-            // Sessions list with sample data
-            const Expanded(
-              child: SessionsList(),
+            Expanded(
+              child: filteredSessions.isEmpty
+                  ? const _EmptySessionsState()
+                  : ListView.separated(
+                      itemCount: filteredSessions.length,
+                      separatorBuilder: (_, _) => const SizedBox(height: 12),
+                      itemBuilder: (context, index) {
+                        final session = filteredSessions[index];
+                        return _SessionCard(session: session);
+                      },
+                    ),
             ),
           ],
         ),
       ),
-      // Add bottom navigation bar
       bottomNavigationBar: CustomBottomNav(
-        currentIndex: currentIndex,
-        onTap: (index) {
-          if (index == 0) {
-            // Go back to Home
-            Navigator.pop(context);
-          } else if (index == 2) {
-            // Navigate to Settings - you can add this later
-            // For now, just show a message
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Settings coming soon!'),
-                duration: Duration(seconds: 2),
-              ),
-            );
-          }
-          // If index == 1 (Sessions), we're already here
-        },
+        currentIndex: 2,
+        appState: widget.appState,
+        onTap: (_) {},
+      ),
+    );
+  }
+
+  List<_SessionItem> _buildSessionItems(List<CustomerContact> customers) {
+    final items = customers
+        .where(
+          (customer) =>
+              customer.lastCallStartedAt != null || customer.lastCallEndedAt != null,
+        )
+        .map((customer) {
+          final startedAt = customer.lastCallStartedAt;
+          final endedAt = customer.lastCallEndedAt;
+          final status = customer.latestRecording != null
+              ? _SessionStatus.uploaded
+              : _SessionStatus.pending;
+
+          return _SessionItem(
+            name: customer.name,
+            phoneNumber: customer.phoneNumber,
+            startedAt: startedAt,
+            endedAt: endedAt,
+            status: status,
+          );
+        })
+        .toList()
+      ..sort((a, b) {
+        final aTime = a.endedAt ?? a.startedAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+        final bTime = b.endedAt ?? b.startedAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+        return bTime.compareTo(aTime);
+      });
+
+    return items;
+  }
+}
+
+class _FilterChipButton extends StatefulWidget {
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _FilterChipButton({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  State<_FilterChipButton> createState() => _FilterChipButtonState();
+}
+
+class _FilterChipButtonState extends State<_FilterChipButton> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final highlighted = widget.selected || _hovered;
+
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      cursor: SystemMouseCursors.click,
+      child: InkWell(
+        onTap: widget.onTap,
+        borderRadius: BorderRadius.circular(10),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          decoration: BoxDecoration(
+            color: highlighted ? const Color(0xFFE17C0F) : const Color(0xFFF2EDE8),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Text(
+            widget.label,
+            style: TextStyle(
+              color: highlighted ? Colors.white : const Color(0xFF554B42),
+              fontSize: 13,
+              fontFamily: 'Open Sans',
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
       ),
     );
   }
 }
 
-// Sessions List Widget
-class SessionsList extends StatelessWidget {
-  const SessionsList({super.key});
+class _SessionCard extends StatelessWidget {
+  final _SessionItem session;
+
+  const _SessionCard({required this.session});
 
   @override
   Widget build(BuildContext context) {
-    // Sample session data - added 2 more cards
-    final List<Map<String, String>> sessions = [
-      {
-        'phone': '+256 757001909',
-        'date': '2024-01-15',
-        'duration': '5m 14s',
-        'status': 'Pending'
-      },
-      {
-        'phone': '+256 72545948',
-        'date': '2024-01-15',
-        'duration': '10m 14s',
-        'status': 'Synced'
-      },
-      {
-        'phone': '+256 772835195',
-        'date': '2024-01-14',
-        'duration': '3m 22s',
-        'status': 'Pending'
-      },
-      {
-        'phone': '+256 701234567',
-        'date': '2024-01-14',
-        'duration': '7m 45s',
-        'status': 'Synced'
-      },
-      // NEW CARD 1
-      {
-        'phone': '+256 788901234',
-        'date': '2024-01-13',
-        'duration': '2m 30s',
-        'status': 'Pending'
-      },
-      // NEW CARD 2
-      {
-        'phone': '+256 712345678',
-        'date': '2024-01-13',
-        'duration': '15m 20s',
-        'status': 'Synced'
-      },
-      // NEW CARD 3 (Optional - added one more for good measure)
-      {
-        'phone': '+256 756789012',
-        'date': '2024-01-12',
-        'duration': '8m 45s',
-        'status': 'Synced'
-      },
-    ];
+    final isPending = session.status == _SessionStatus.pending;
+    final statusColor = isPending ? const Color(0xFFE17C0F) : const Color(0xFF2E8B57);
 
-    return ListView.builder(
-      itemCount: sessions.length,
-      itemBuilder: (context, index) {
-        final session = sessions[index];
-        final isPending = session['status'] == 'Pending';
-
-        return Container(
-          margin: const EdgeInsets.only(bottom: 12),
-          padding: const EdgeInsets.all(15),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            border: Border.all(color: const Color(0xFFE0E0E0)),
-            borderRadius: BorderRadius.circular(8),
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border.all(color: const Color(0xFFE0E0E0)),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              color: statusColor.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(
+              isPending ? Icons.schedule_rounded : Icons.cloud_done_rounded,
+              color: statusColor,
+              size: 22,
+            ),
           ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              // Left side: session details
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      session['phone']!,
-                      style: const TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                        color: Color(0xFF554B42),
-                      ),
-                    ),
-                    const SizedBox(height: 5),
-                    Text(
-                      '${session['date']} • ${session['duration']}',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.grey[500],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              // Right side: status badge
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 5,
-                ),
-                decoration: BoxDecoration(
-                  color: isPending
-                      ? Colors.orange.withOpacity(0.1)
-                      : Colors.green.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                child: Text(
-                  session['status']!,
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    color: isPending ? Colors.orange : Colors.green,
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  session.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFF554B42),
+                    fontFamily: 'Open Sans',
                   ),
                 ),
-              ),
-            ],
+                const SizedBox(height: 3),
+                Text(
+                  session.phoneNumber,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    color: Color(0xFF7A7067),
+                    fontFamily: 'Open Sans',
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  session.metaLine,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: Color(0xFF8F867D),
+                    fontFamily: 'Open Sans',
+                  ),
+                ),
+              ],
+            ),
           ),
-        );
-      },
+          const SizedBox(width: 12),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+            decoration: BoxDecoration(
+              color: statusColor.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(999),
+            ),
+            child: Text(
+              session.statusLabel,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                color: statusColor,
+                fontFamily: 'Open Sans',
+              ),
+            ),
+          ),
+        ],
+      ),
     );
+  }
+}
+
+class _EmptySessionsState extends StatelessWidget {
+  const _EmptySessionsState();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFFE0E0E0)),
+      ),
+      child: const Text(
+        'Call sessions will appear here after customer calls are tracked.',
+        style: TextStyle(
+          color: Color(0xFF7A7067),
+          fontSize: 13,
+          fontFamily: 'Open Sans',
+        ),
+      ),
+    );
+  }
+}
+
+enum _SessionStatus { pending, uploaded }
+
+class _SessionItem {
+  final String name;
+  final String phoneNumber;
+  final DateTime? startedAt;
+  final DateTime? endedAt;
+  final _SessionStatus status;
+
+  const _SessionItem({
+    required this.name,
+    required this.phoneNumber,
+    required this.startedAt,
+    required this.endedAt,
+    required this.status,
+  });
+
+  String get statusLabel => status == _SessionStatus.pending ? 'Pending' : 'Uploaded';
+
+  String get metaLine {
+    final callStamp = startedAt ?? endedAt;
+    final callTime = callStamp == null ? 'No call time saved' : _formatDate(callStamp);
+    if (startedAt == null || endedAt == null) {
+      return callTime;
+    }
+
+    final duration = endedAt!.difference(startedAt!);
+    final minutes = duration.inMinutes;
+    final seconds = duration.inSeconds % 60;
+    return '$callTime • ${minutes}m ${seconds.toString().padLeft(2, '0')}s';
+  }
+
+  static String _formatDate(DateTime value) {
+    final day = value.day.toString().padLeft(2, '0');
+    final month = value.month.toString().padLeft(2, '0');
+    final hour = value.hour.toString().padLeft(2, '0');
+    final minute = value.minute.toString().padLeft(2, '0');
+    return '$day/$month/${value.year} • $hour:$minute';
   }
 }

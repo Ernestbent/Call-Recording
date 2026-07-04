@@ -1,15 +1,20 @@
+import 'package:calls_recording/screens/customers_screen.dart';
+import 'package:calls_recording/screens/home_screen.dart';
 import 'package:flutter/material.dart';
+import 'package:calls_recording/services/customer_call_store.dart';
 import 'package:calls_recording/screens/session.dart';
-import 'package:calls_recording/screens/settings.dart'; // Import Settings
+import 'package:calls_recording/screens/settings.dart';
 
 class CustomBottomNav extends StatefulWidget {
   final int currentIndex;
   final Function(int) onTap;
+  final CustomerCallStore appState;
 
   const CustomBottomNav({
     super.key,
     required this.currentIndex,
     required this.onTap,
+    required this.appState,
   });
 
   @override
@@ -20,31 +25,36 @@ class _CustomBottomNavState extends State<CustomBottomNav> {
   int _hoveredIndex = -1;
 
   void _handleTap(int index, BuildContext context) {
-    if (index == 1) {
-      // Navigate to Sessions screen
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (context) => const SessionsScreen(),
-        ),
-      );
-    } else if (index == 2) {
-      // Navigate to Settings screen
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (context) => const SettingsScreen(),
-        ),
-      );
-    } else {
-      // For Home (0), use the regular onTap
+    if (index == widget.currentIndex) {
       widget.onTap(index);
+      return;
     }
+
+    final destination = switch (index) {
+      0 => HomeScreen(appState: widget.appState),
+      1 => CustomersScreen(appState: widget.appState),
+      2 => SessionsScreen(appState: widget.appState),
+      3 => SettingsScreen(appState: widget.appState),
+      _ => null,
+    };
+
+    if (destination == null) {
+      widget.onTap(index);
+      return;
+    }
+
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(builder: (context) => destination),
+    );
+
+    widget.onTap(index);
   }
 
   Widget _buildItem({
     required String label,
-    required String iconPath,
+    String? iconPath,
+    IconData? iconData,
     required int index,
     required BuildContext context,
   }) {
@@ -59,19 +69,26 @@ class _CustomBottomNavState extends State<CustomBottomNav> {
       child: InkWell(
         onTap: () => _handleTap(index, context),
         borderRadius: BorderRadius.circular(8),
-        splashColor: Colors.orange.withOpacity(0.2),
-        highlightColor: Colors.orange.withOpacity(0.1),
+        splashColor: Colors.orange.withValues(alpha: 0.2),
+        highlightColor: Colors.orange.withValues(alpha: 0.1),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Image.asset(
-                iconPath,
-                width: 26,
-                height: 26,
-                color: isOrange ? Colors.orange : Colors.grey,
-              ),
+              if (iconPath != null)
+                Image.asset(
+                  iconPath,
+                  width: 26,
+                  height: 26,
+                  color: isOrange ? Colors.orange : Colors.grey,
+                )
+              else if (iconData != null)
+                Icon(
+                  iconData,
+                  size: 26,
+                  color: isOrange ? Colors.orange : Colors.grey,
+                ),
               const SizedBox(height: 6),
               Text(
                 label,
@@ -94,29 +111,33 @@ class _CustomBottomNavState extends State<CustomBottomNav> {
       padding: const EdgeInsets.symmetric(vertical: 12),
       decoration: const BoxDecoration(
         color: Colors.white,
-        border: Border(
-          top: BorderSide(color: Color(0xFFE0E0E0)),
-        ),
+        border: Border(top: BorderSide(color: Color(0xFFE0E0E0))),
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
         children: [
           _buildItem(
             label: "Home",
-            iconPath: "lib/images/home.png",
+            iconData: Icons.home_outlined,
             index: 0,
             context: context,
           ),
           _buildItem(
-            label: "Sessions",
-            iconPath: "lib/images/menu.png",
+            label: "Customers",
+            iconData: Icons.person_outline_rounded,
             index: 1,
             context: context,
           ),
           _buildItem(
-            label: "Settings",
-            iconPath: "lib/images/settings.png",
+            label: "Sessions",
+            iconData: Icons.checklist_rounded,
             index: 2,
+            context: context,
+          ),
+          _buildItem(
+            label: "Settings",
+            iconData: Icons.settings_outlined,
+            index: 3,
             context: context,
           ),
         ],

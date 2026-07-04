@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:async';
 import 'package:phone_state/phone_state.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -17,11 +18,39 @@ class CallManager {
       final micStatus = await Permission.microphone.request();
       print('   Mic: ${micStatus.isGranted ? "✅ GRANTED" : "❌ DENIED"}');
 
-      final allGranted = phoneStatus.isGranted && micStatus.isGranted;
-      
-      print(allGranted
-          ? '✅ All permissions granted'
-          : '❌ Some permissions denied');
+      print('📱 Requesting Storage permission...');
+      final storageStatus = await Permission.storage.request();
+      print(
+        '   Storage: ${storageStatus.isGranted ? "✅ GRANTED" : "❌ DENIED"}',
+      );
+
+      print('📱 Requesting Audio files permission...');
+      final audioStatus = await Permission.audio.request();
+      print(
+        '   Audio files: ${audioStatus.isGranted ? "✅ GRANTED" : "❌ DENIED"}',
+      );
+
+      PermissionStatus? manageStorageStatus;
+      if (Platform.isAndroid) {
+        print('📱 Requesting All files access...');
+        manageStorageStatus = await Permission.manageExternalStorage.request();
+        print(
+          '   All files: ${manageStorageStatus.isGranted ? "✅ GRANTED" : "❌ DENIED"}',
+        );
+      }
+
+      final hasRecordingFileAccess =
+          storageStatus.isGranted ||
+          audioStatus.isGranted ||
+          (manageStorageStatus?.isGranted ?? false);
+      final allGranted =
+          phoneStatus.isGranted &&
+          micStatus.isGranted &&
+          hasRecordingFileAccess;
+
+      print(
+        allGranted ? '✅ All permissions granted' : '❌ Some permissions denied',
+      );
 
       return allGranted;
     } catch (e) {
@@ -39,8 +68,8 @@ class CallManager {
       _subscription = PhoneState.stream.listen(
         (event) {
           final now = DateTime.now();
-          final timeSinceLastEvent = _lastEventTime != null 
-              ? now.difference(_lastEventTime!).inSeconds 
+          final timeSinceLastEvent = _lastEventTime != null
+              ? now.difference(_lastEventTime!).inSeconds
               : 0;
           _lastEventTime = now;
 
