@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:calls_recording/services/customer_call_store.dart';
 import 'package:calls_recording/screens/home_screen.dart';
 import 'package:calls_recording/widgets/custom_bottom_nav.dart';
+import 'package:calls_recording/theme/app_theme.dart';
 
 class SettingsScreen extends StatefulWidget {
   final CustomerCallStore appState;
@@ -35,23 +36,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        centerTitle: true,
-        toolbarHeight: 80,
-        title: const Text(
-          'Settings',
-          style: TextStyle(
-            fontFamily: 'Open Sans',
-            fontSize: 20,
-            fontWeight: FontWeight.w500,
-            color: Color(0xFF554B42),
-          ),
-        ),
-        bottom: const PreferredSize(
-          preferredSize: Size.fromHeight(1),
-          child: Divider(color: Color(0xFFD9D9D9), thickness: 1, height: 1),
-        ),
+        title: const Text('Settings'),
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Color(0xFF554B42)),
+          tooltip: 'Back',
+          icon: const Icon(Icons.arrow_back_rounded),
           onPressed: () {
             Navigator.pushReplacement(
               context,
@@ -62,61 +50,66 @@ class _SettingsScreenState extends State<SettingsScreen> {
           },
         ),
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Settings title
-            const Text(
-              'Settings',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.w600,
-                color: Color(0xFF554B42),
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 22, 20, 0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Personalise your workspace',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w400,
+                  color: AppColors.ink,
+                  letterSpacing: -0.2,
+                ),
               ),
-            ),
-            const SizedBox(height: 20),
-
-            // Settings list
-            Expanded(
-              child: ListView(
-                children: [
-                  // API URL Section
-                  _buildSectionHeader('API Configuration'),
-                  _buildApiUrlField(),
-                  const SizedBox(height: 16),
-
-                  // Call Settings Section
-                  _buildSectionHeader('Call Settings'),
-                  _buildSwitchTile(
-                    title: 'Auto-Record Calls',
-                    subtitle: 'Automatically record all incoming calls',
-                    value: _autoRecordCalls,
-                    onChanged: (value) {
-                      setState(() {
-                        _autoRecordCalls = value;
-                      });
-                    },
-                  ),
-                  const SizedBox(height: 16),
-
-                  // Appearance Settings
-                  _buildSectionHeader('Appearance'),
-                  _buildSwitchTile(
-                    title: 'Dark Mode',
-                    subtitle: 'Switch between light and dark theme',
-                    value: _darkMode,
-                    onChanged: (value) {
-                      setState(() {
-                        _darkMode = value;
-                      });
-                    },
-                  ),
-                ],
+              const SizedBox(height: 6),
+              const Text(
+                'Manage recording behaviour and connections.',
+                style: TextStyle(fontSize: 13, color: AppColors.muted),
               ),
-            ),
-          ],
+              const SizedBox(height: 26),
+
+              Expanded(
+                child: ListView(
+                  children: [
+                    _buildSectionHeader('API Configuration'),
+                    _buildApiUrlField(),
+                    const SizedBox(height: 24),
+
+                    _buildSectionHeader('Call Settings'),
+                    _buildSwitchTile(
+                      icon: Icons.mic_none_rounded,
+                      title: 'Auto-Record Calls',
+                      subtitle: 'Automatically record all incoming calls',
+                      value: _autoRecordCalls,
+                      onChanged: (value) {
+                        setState(() {
+                          _autoRecordCalls = value;
+                        });
+                      },
+                    ),
+                    const SizedBox(height: 24),
+
+                    _buildSectionHeader('Appearance'),
+                    _buildSwitchTile(
+                      icon: Icons.dark_mode_outlined,
+                      title: 'Dark Mode',
+                      subtitle: 'Switch between light and dark theme',
+                      value: _darkMode,
+                      onChanged: (value) {
+                        setState(() {
+                          _darkMode = value;
+                        });
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
       ),
       bottomNavigationBar: CustomBottomNav(
@@ -129,40 +122,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Widget _buildSectionHeader(String title) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: Text(
-        title,
-        style: TextStyle(
-          fontSize: 14,
-          fontWeight: FontWeight.w600,
-          color: Colors.grey[600],
-          letterSpacing: 0.5,
-        ),
-      ),
+      padding: const EdgeInsets.only(bottom: 10),
+      child: SectionLabel(title),
     );
   }
 
   Widget _buildApiUrlField() {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border.all(color: const Color(0xFFE0E0E0)),
-        borderRadius: BorderRadius.circular(8),
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      decoration: AppSurfaces.card(
+        color: AppColors.surfaceMuted,
+        radius: 14,
+        elevated: false,
       ),
       child: Row(
         children: [
-          const Icon(Icons.link, color: Color(0xFFE17C0F), size: 20),
-          const SizedBox(width: 12),
           Expanded(
             child: TextField(
               controller: _apiUrlController,
               decoration: const InputDecoration(
                 hintText: 'https://127.0.0.1:8002/api/upload/',
+                prefixIcon: Icon(Icons.link_rounded),
                 border: InputBorder.none,
-                hintStyle: TextStyle(fontSize: 14, color: Colors.grey),
+                filled: false,
               ),
-              style: const TextStyle(fontSize: 14, color: Color(0xFF554B42)),
+              style: const TextStyle(fontSize: 14, color: AppColors.ink),
               onChanged: (value) {
                 setState(() {
                   _apiUrl = value;
@@ -171,17 +155,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           ),
           IconButton(
-            icon: const Icon(
-              Icons.check_circle,
-              color: Color(0xFFE17C0F),
-              size: 20,
-            ),
+            icon: const Icon(Icons.check_rounded, size: 19),
+            color: Colors.white,
+            style: IconButton.styleFrom(backgroundColor: AppColors.primary),
             onPressed: () {
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(
                   content: Text('API URL saved successfully!'),
                   duration: Duration(seconds: 2),
-                  backgroundColor: Colors.green,
+                  backgroundColor: AppColors.success,
                 ),
               );
             },
@@ -192,6 +174,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Widget _buildSwitchTile({
+    required IconData icon,
     required String title,
     required String subtitle,
     required bool value,
@@ -199,14 +182,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }) {
     return Container(
       margin: const EdgeInsets.only(bottom: 4),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border.all(color: const Color(0xFFE0E0E0)),
-        borderRadius: BorderRadius.circular(8),
+      padding: const EdgeInsets.all(16),
+      decoration: AppSurfaces.card(
+        color: AppColors.surfaceMuted,
+        radius: 14,
+        elevated: false,
       ),
       child: Row(
         children: [
+          Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              color: AppColors.primarySoft,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(icon, color: AppColors.primary, size: 21),
+          ),
+          const SizedBox(width: 13),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -215,14 +208,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   title,
                   style: const TextStyle(
                     fontSize: 14,
-                    fontWeight: FontWeight.w500,
-                    color: Color(0xFF554B42),
+                    fontWeight: FontWeight.w400,
+                    color: AppColors.ink,
                   ),
                 ),
                 const SizedBox(height: 2),
                 Text(
                   subtitle,
-                  style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+                  style: const TextStyle(fontSize: 12, color: AppColors.muted),
                 ),
               ],
             ),
@@ -230,8 +223,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
           Switch(
             value: value,
             onChanged: onChanged,
-            activeThumbColor: const Color(0xFFE17C0F),
-            activeTrackColor: const Color(0xFFE17C0F).withValues(alpha: 0.3),
+            activeThumbColor: Colors.white,
+            activeTrackColor: AppColors.primary,
+            inactiveThumbColor: Colors.white,
+            inactiveTrackColor: AppColors.border,
           ),
         ],
       ),

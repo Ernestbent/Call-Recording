@@ -1,11 +1,11 @@
 {
-    "name": "calls_recording",
-    "short_name": "calls_recording",
+    "name": "Call Recorder",
+    "short_name": "Recorder",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#554B42",
+    "theme_color": "#554B42",
+    "description": "Securely organise customer call recordings.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

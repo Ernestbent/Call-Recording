@@ -1,6 +1,7 @@
 import 'package:calls_recording/models/customer_contact.dart';
 import 'package:calls_recording/screens/home_screen.dart';
 import 'package:calls_recording/services/customer_call_store.dart';
+import 'package:calls_recording/theme/app_theme.dart';
 import 'package:calls_recording/widgets/custom_bottom_nav.dart';
 import 'package:flutter/material.dart';
 
@@ -23,12 +24,14 @@ class _SessionsScreenState extends State<SessionsScreen> {
     final sessions = _buildSessionItems(widget.appState.customers);
     final filteredSessions = switch (_selectedFilter) {
       _SessionFilter.all => sessions,
-      _SessionFilter.pending => sessions
-          .where((session) => session.status == _SessionStatus.pending)
-          .toList(),
-      _SessionFilter.uploaded => sessions
-          .where((session) => session.status == _SessionStatus.uploaded)
-          .toList(),
+      _SessionFilter.pending =>
+        sessions
+            .where((session) => session.status == _SessionStatus.pending)
+            .toList(),
+      _SessionFilter.uploaded =>
+        sessions
+            .where((session) => session.status == _SessionStatus.uploaded)
+            .toList(),
     };
 
     final pendingCount = sessions
@@ -40,23 +43,10 @@ class _SessionsScreenState extends State<SessionsScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        centerTitle: true,
-        toolbarHeight: 80,
-        title: const Text(
-          'All Sessions',
-          style: TextStyle(
-            fontFamily: 'Open Sans',
-            fontSize: 20,
-            fontWeight: FontWeight.w500,
-            color: Color(0xFF554B42),
-          ),
-        ),
-        bottom: const PreferredSize(
-          preferredSize: Size.fromHeight(1),
-          child: Divider(color: Color(0xFFD9D9D9), thickness: 1, height: 1),
-        ),
+        title: const Text('Sessions'),
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_rounded, color: Color(0xFF554B42)),
+          tooltip: 'Back',
+          icon: const Icon(Icons.arrow_back_rounded),
           onPressed: () {
             Navigator.pushReplacement(
               context,
@@ -67,48 +57,61 @@ class _SessionsScreenState extends State<SessionsScreen> {
           },
         ),
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Wrap(
-              spacing: 10,
-              runSpacing: 10,
-              children: [
-                _FilterChipButton(
-                  label: 'All (${sessions.length})',
-                  selected: _selectedFilter == _SessionFilter.all,
-                  onTap: () => setState(() => _selectedFilter = _SessionFilter.all),
-                ),
-                _FilterChipButton(
-                  label: 'Pending ($pendingCount)',
-                  selected: _selectedFilter == _SessionFilter.pending,
-                  onTap: () =>
-                      setState(() => _selectedFilter = _SessionFilter.pending),
-                ),
-                _FilterChipButton(
-                  label: 'Uploaded ($uploadedCount)',
-                  selected: _selectedFilter == _SessionFilter.uploaded,
-                  onTap: () =>
-                      setState(() => _selectedFilter = _SessionFilter.uploaded),
-                ),
-              ],
-            ),
-            const SizedBox(height: 20),
-            Expanded(
-              child: filteredSessions.isEmpty
-                  ? const _EmptySessionsState()
-                  : ListView.separated(
-                      itemCount: filteredSessions.length,
-                      separatorBuilder: (_, _) => const SizedBox(height: 12),
-                      itemBuilder: (context, index) {
-                        final session = filteredSessions[index];
-                        return _SessionCard(session: session);
-                      },
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 22, 20, 0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: [
+                  _FilterChipButton(
+                    label: 'All (${sessions.length})',
+                    selected: _selectedFilter == _SessionFilter.all,
+                    onTap: () =>
+                        setState(() => _selectedFilter = _SessionFilter.all),
+                  ),
+                  _FilterChipButton(
+                    label: 'Pending ($pendingCount)',
+                    selected: _selectedFilter == _SessionFilter.pending,
+                    onTap: () => setState(
+                      () => _selectedFilter = _SessionFilter.pending,
                     ),
-            ),
-          ],
+                  ),
+                  _FilterChipButton(
+                    label: 'Uploaded ($uploadedCount)',
+                    selected: _selectedFilter == _SessionFilter.uploaded,
+                    onTap: () => setState(
+                      () => _selectedFilter = _SessionFilter.uploaded,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 24),
+              SectionLabel(
+                _selectedFilter == _SessionFilter.all
+                    ? 'All sessions'
+                    : _selectedFilter == _SessionFilter.pending
+                    ? 'Awaiting recording'
+                    : 'Ready to review',
+              ),
+              const SizedBox(height: 12),
+              Expanded(
+                child: filteredSessions.isEmpty
+                    ? const _EmptySessionsState()
+                    : ListView.separated(
+                        itemCount: filteredSessions.length,
+                        separatorBuilder: (_, _) => const SizedBox(height: 12),
+                        itemBuilder: (context, index) {
+                          final session = filteredSessions[index];
+                          return _SessionCard(session: session);
+                        },
+                      ),
+              ),
+            ],
+          ),
         ),
       ),
       bottomNavigationBar: CustomBottomNav(
@@ -120,32 +123,40 @@ class _SessionsScreenState extends State<SessionsScreen> {
   }
 
   List<_SessionItem> _buildSessionItems(List<CustomerContact> customers) {
-    final items = customers
-        .where(
-          (customer) =>
-              customer.lastCallStartedAt != null || customer.lastCallEndedAt != null,
-        )
-        .map((customer) {
-          final startedAt = customer.lastCallStartedAt;
-          final endedAt = customer.lastCallEndedAt;
-          final status = customer.latestRecording != null
-              ? _SessionStatus.uploaded
-              : _SessionStatus.pending;
+    final items =
+        customers
+            .where(
+              (customer) =>
+                  customer.lastCallStartedAt != null ||
+                  customer.lastCallEndedAt != null,
+            )
+            .map((customer) {
+              final startedAt = customer.lastCallStartedAt;
+              final endedAt = customer.lastCallEndedAt;
+              final status = customer.latestRecording != null
+                  ? _SessionStatus.uploaded
+                  : _SessionStatus.pending;
 
-          return _SessionItem(
-            name: customer.name,
-            phoneNumber: customer.phoneNumber,
-            startedAt: startedAt,
-            endedAt: endedAt,
-            status: status,
-          );
-        })
-        .toList()
-      ..sort((a, b) {
-        final aTime = a.endedAt ?? a.startedAt ?? DateTime.fromMillisecondsSinceEpoch(0);
-        final bTime = b.endedAt ?? b.startedAt ?? DateTime.fromMillisecondsSinceEpoch(0);
-        return bTime.compareTo(aTime);
-      });
+              return _SessionItem(
+                name: customer.name,
+                phoneNumber: customer.phoneNumber,
+                startedAt: startedAt,
+                endedAt: endedAt,
+                status: status,
+              );
+            })
+            .toList()
+          ..sort((a, b) {
+            final aTime =
+                a.endedAt ??
+                a.startedAt ??
+                DateTime.fromMillisecondsSinceEpoch(0);
+            final bTime =
+                b.endedAt ??
+                b.startedAt ??
+                DateTime.fromMillisecondsSinceEpoch(0);
+            return bTime.compareTo(aTime);
+          });
 
     return items;
   }
@@ -179,21 +190,21 @@ class _FilterChipButtonState extends State<_FilterChipButton> {
       cursor: SystemMouseCursors.click,
       child: InkWell(
         onTap: widget.onTap,
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(999),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 180),
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
           decoration: BoxDecoration(
-            color: highlighted ? const Color(0xFFE17C0F) : const Color(0xFFF2EDE8),
-            borderRadius: BorderRadius.circular(10),
+            color: highlighted ? AppColors.primary : AppColors.surfaceMuted,
+            borderRadius: BorderRadius.circular(999),
           ),
           child: Text(
             widget.label,
             style: TextStyle(
-              color: highlighted ? Colors.white : const Color(0xFF554B42),
-              fontSize: 13,
-              fontFamily: 'Open Sans',
-              fontWeight: FontWeight.w600,
+              color: highlighted ? Colors.white : AppColors.muted,
+              fontSize: 12,
+              fontFamily: 'Bubblegum Sans',
+              fontWeight: FontWeight.w400,
             ),
           ),
         ),
@@ -210,15 +221,14 @@ class _SessionCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isPending = session.status == _SessionStatus.pending;
-    final statusColor = isPending ? const Color(0xFFE17C0F) : const Color(0xFF2E8B57);
+    final statusColor = isPending ? AppColors.warning : AppColors.success;
+    final statusBackground = isPending
+        ? AppColors.warningSoft
+        : AppColors.successSoft;
 
     return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border.all(color: const Color(0xFFE0E0E0)),
-        borderRadius: BorderRadius.circular(10),
-      ),
+      padding: const EdgeInsets.all(17),
+      decoration: AppSurfaces.card(radius: 16),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -226,8 +236,8 @@ class _SessionCard extends StatelessWidget {
             width: 42,
             height: 42,
             decoration: BoxDecoration(
-              color: statusColor.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(12),
+              color: statusBackground,
+              borderRadius: BorderRadius.circular(13),
             ),
             child: Icon(
               isPending ? Icons.schedule_rounded : Icons.cloud_done_rounded,
@@ -246,9 +256,9 @@ class _SessionCard extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                     fontSize: 15,
-                    fontWeight: FontWeight.w700,
-                    color: Color(0xFF554B42),
-                    fontFamily: 'Open Sans',
+                    fontWeight: FontWeight.w400,
+                    color: AppColors.ink,
+                    fontFamily: 'Bubblegum Sans',
                   ),
                 ),
                 const SizedBox(height: 3),
@@ -256,8 +266,8 @@ class _SessionCard extends StatelessWidget {
                   session.phoneNumber,
                   style: const TextStyle(
                     fontSize: 13,
-                    color: Color(0xFF7A7067),
-                    fontFamily: 'Open Sans',
+                    color: AppColors.muted,
+                    fontFamily: 'Bubblegum Sans',
                   ),
                 ),
                 const SizedBox(height: 6),
@@ -267,8 +277,8 @@ class _SessionCard extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
                     fontSize: 12,
-                    color: Color(0xFF8F867D),
-                    fontFamily: 'Open Sans',
+                    color: AppColors.subtle,
+                    fontFamily: 'Bubblegum Sans',
                   ),
                 ),
               ],
@@ -278,16 +288,16 @@ class _SessionCard extends StatelessWidget {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
             decoration: BoxDecoration(
-              color: statusColor.withValues(alpha: 0.12),
+              color: statusBackground,
               borderRadius: BorderRadius.circular(999),
             ),
             child: Text(
               session.statusLabel,
               style: TextStyle(
                 fontSize: 12,
-                fontWeight: FontWeight.w700,
+                fontWeight: FontWeight.w400,
                 color: statusColor,
-                fontFamily: 'Open Sans',
+                fontFamily: 'Bubblegum Sans',
               ),
             ),
           ),
@@ -305,18 +315,23 @@ class _EmptySessionsState extends StatelessWidget {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: const Color(0xFFE0E0E0)),
-      ),
-      child: const Text(
-        'Call sessions will appear here after customer calls are tracked.',
-        style: TextStyle(
-          color: Color(0xFF7A7067),
-          fontSize: 13,
-          fontFamily: 'Open Sans',
-        ),
+      decoration: AppSurfaces.placeholder(radius: 16),
+      child: const Row(
+        children: [
+          Icon(Icons.history_rounded, color: AppColors.subtle),
+          SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              'Call sessions will appear here after customer calls are tracked.',
+              style: TextStyle(
+                color: AppColors.muted,
+                fontSize: 13,
+                height: 1.4,
+                fontFamily: 'Bubblegum Sans',
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -339,11 +354,14 @@ class _SessionItem {
     required this.status,
   });
 
-  String get statusLabel => status == _SessionStatus.pending ? 'Pending' : 'Uploaded';
+  String get statusLabel =>
+      status == _SessionStatus.pending ? 'Pending' : 'Uploaded';
 
   String get metaLine {
     final callStamp = startedAt ?? endedAt;
-    final callTime = callStamp == null ? 'No call time saved' : _formatDate(callStamp);
+    final callTime = callStamp == null
+        ? 'No call time saved'
+        : _formatDate(callStamp);
     if (startedAt == null || endedAt == null) {
       return callTime;
     }

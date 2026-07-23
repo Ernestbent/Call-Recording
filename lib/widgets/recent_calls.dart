@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:calls_recording/theme/app_theme.dart';
 
 class RecentCalls extends StatelessWidget {
   final String phoneNumber;
@@ -16,76 +17,85 @@ class RecentCalls extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final accentColor = hasRecording
-        ? const Color(0xFFE17C0F)
-        : const Color(0xFF8F867D);
+    final accentColor = hasRecording ? AppColors.primary : AppColors.subtle;
 
-    return Column(
-      children: [
-        Container(
-          width: double.infinity,
-          constraints: const BoxConstraints(minHeight: 100),
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-          decoration: BoxDecoration(
-            color: const Color(0xFF554B42),
-            borderRadius: BorderRadius.circular(10),
+    return Container(
+      width: double.infinity,
+      constraints: const BoxConstraints(minHeight: 92),
+      padding: const EdgeInsets.all(16),
+      decoration: AppSurfaces.card(radius: 16),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              color: hasRecording
+                  ? AppColors.primarySoft
+                  : AppColors.surfaceMuted,
+              borderRadius: BorderRadius.circular(11),
+            ),
+            child: Icon(
+              hasRecording ? Icons.graphic_eq_rounded : Icons.schedule_rounded,
+              color: accentColor,
+              size: 21,
+            ),
           ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      phoneNumber,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 15,
-                        fontFamily: 'Open Sans',
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      timeInfo,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Colors.white70,
-                        fontSize: 13,
-                        fontFamily: 'Open Sans',
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 16),
-              InkWell(
-                onTap: hasRecording ? onPlayTap : null,
-                borderRadius: BorderRadius.circular(18),
-                child: SizedBox(
-                  width: 30,
-                  height: 30,
-                  child: Icon(
-                    hasRecording
-                        ? Icons.play_circle_fill_rounded
-                        : Icons.schedule_rounded,
-                    color: accentColor,
-                    size: 30,
+          const SizedBox(width: 13),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  phoneNumber,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: AppColors.ink,
+                    fontSize: 14,
+                    fontFamily: 'Bubblegum Sans',
+                    fontWeight: FontWeight.w400,
                   ),
                 ),
-              ),
-            ],
+                const SizedBox(height: 5),
+                Text(
+                  timeInfo,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: AppColors.muted,
+                    fontSize: 12,
+                    height: 1.35,
+                    fontFamily: 'Bubblegum Sans',
+                  ),
+                ),
+              ],
+            ),
           ),
-        ),
-        const SizedBox(height: 10),
-      ],
+          const SizedBox(width: 12),
+          Material(
+            color: hasRecording ? AppColors.primary : AppColors.surfaceMuted,
+            shape: const CircleBorder(),
+            child: InkWell(
+              onTap: hasRecording ? onPlayTap : null,
+              customBorder: const CircleBorder(),
+              child: SizedBox(
+                width: 38,
+                height: 38,
+                child: Icon(
+                  hasRecording
+                      ? Icons.play_arrow_rounded
+                      : Icons.more_horiz_rounded,
+                  color: hasRecording ? Colors.white : accentColor,
+                  size: 22,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

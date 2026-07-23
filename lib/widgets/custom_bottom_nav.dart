@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:calls_recording/services/customer_call_store.dart';
 import 'package:calls_recording/screens/session.dart';
 import 'package:calls_recording/screens/settings.dart';
+import 'package:calls_recording/theme/app_theme.dart';
 
 class CustomBottomNav extends StatefulWidget {
   final int currentIndex;
@@ -53,14 +54,13 @@ class _CustomBottomNavState extends State<CustomBottomNav> {
 
   Widget _buildItem({
     required String label,
-    String? iconPath,
-    IconData? iconData,
+    required IconData iconData,
     required int index,
     required BuildContext context,
   }) {
     final isActive = widget.currentIndex == index;
     final isHovered = _hoveredIndex == index;
-    final isOrange = isActive || isHovered;
+    final isHighlighted = isActive || isHovered;
 
     return MouseRegion(
       onEnter: (_) => setState(() => _hoveredIndex = index),
@@ -68,34 +68,30 @@ class _CustomBottomNavState extends State<CustomBottomNav> {
       cursor: SystemMouseCursors.click,
       child: InkWell(
         onTap: () => _handleTap(index, context),
-        borderRadius: BorderRadius.circular(8),
-        splashColor: Colors.orange.withValues(alpha: 0.2),
-        highlightColor: Colors.orange.withValues(alpha: 0.1),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        borderRadius: BorderRadius.circular(14),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOut,
+          padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 9),
+          decoration: BoxDecoration(
+            color: Colors.transparent,
+            borderRadius: BorderRadius.circular(14),
+          ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              if (iconPath != null)
-                Image.asset(
-                  iconPath,
-                  width: 26,
-                  height: 26,
-                  color: isOrange ? Colors.orange : Colors.grey,
-                )
-              else if (iconData != null)
-                Icon(
-                  iconData,
-                  size: 26,
-                  color: isOrange ? Colors.orange : Colors.grey,
-                ),
-              const SizedBox(height: 6),
+              Icon(
+                iconData,
+                size: 23,
+                color: isHighlighted ? AppColors.primary : AppColors.subtle,
+              ),
+              const SizedBox(height: 5),
               Text(
                 label,
                 style: TextStyle(
-                  fontSize: 12,
-                  color: isOrange ? Colors.orange : Colors.grey,
-                  fontWeight: isOrange ? FontWeight.bold : FontWeight.normal,
+                  fontSize: 10,
+                  color: isHighlighted ? AppColors.primary : AppColors.muted,
+                  fontWeight: FontWeight.w400,
                 ),
               ),
             ],
@@ -108,35 +104,48 @@ class _CustomBottomNavState extends State<CustomBottomNav> {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(vertical: 12),
+      padding: EdgeInsets.fromLTRB(
+        10,
+        10,
+        10,
+        10 + MediaQuery.paddingOf(context).bottom,
+      ),
       decoration: const BoxDecoration(
-        color: Colors.white,
-        border: Border(top: BorderSide(color: Color(0xFFE0E0E0))),
+        color: AppColors.surface,
+        boxShadow: AppShadows.navigation,
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
         children: [
           _buildItem(
             label: "Home",
-            iconData: Icons.home_outlined,
+            iconData: widget.currentIndex == 0
+                ? Icons.home_rounded
+                : Icons.home_outlined,
             index: 0,
             context: context,
           ),
           _buildItem(
             label: "Customers",
-            iconData: Icons.person_outline_rounded,
+            iconData: widget.currentIndex == 1
+                ? Icons.people_alt_rounded
+                : Icons.people_alt_outlined,
             index: 1,
             context: context,
           ),
           _buildItem(
             label: "Sessions",
-            iconData: Icons.checklist_rounded,
+            iconData: widget.currentIndex == 2
+                ? Icons.view_timeline_rounded
+                : Icons.view_timeline_outlined,
             index: 2,
             context: context,
           ),
           _buildItem(
             label: "Settings",
-            iconData: Icons.settings_outlined,
+            iconData: widget.currentIndex == 3
+                ? Icons.settings_rounded
+                : Icons.settings_outlined,
             index: 3,
             context: context,
           ),

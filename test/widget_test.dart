@@ -15,6 +15,11 @@ void main() {
     await tester.pumpWidget(MyApp(appState: CustomerCallStore()));
 
     expect(find.text('Call Recorder'), findsOneWidget);
-    expect(find.text('Recordings Ready'), findsOneWidget);
+    expect(find.text('Every conversation, organised.'), findsOneWidget);
+
+    await tester.pump(const Duration(milliseconds: 3300));
+    await tester.pumpAndSettle();
+
+    expect(find.text('RECORDINGS READY'), findsOneWidget);
   });
 }

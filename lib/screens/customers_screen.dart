@@ -1,6 +1,7 @@
 import 'package:calls_recording/models/call_recording_file.dart';
 import 'package:calls_recording/models/customer_contact.dart';
 import 'package:calls_recording/services/customer_call_store.dart';
+import 'package:calls_recording/theme/app_theme.dart';
 import 'package:calls_recording/widgets/custom_bottom_nav.dart';
 import 'package:flutter/material.dart';
 
@@ -12,29 +13,13 @@ class CustomersScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        centerTitle: true,
-        toolbarHeight: 80,
-        title: const Text(
-          'Customers',
-          style: TextStyle(
-            fontFamily: 'Open Sans',
-            fontSize: 20,
-            fontWeight: FontWeight.w500,
-            color: Color(0xFF554B42),
-          ),
-        ),
-        bottom: const PreferredSize(
-          preferredSize: Size.fromHeight(1),
-          child: Divider(color: Color(0xFFD9D9D9), thickness: 1, height: 1),
-        ),
-      ),
+      appBar: AppBar(title: const Text('Customers')),
       body: SafeArea(
         child: AnimatedBuilder(
           animation: appState,
           builder: (context, _) {
             return Padding(
-              padding: const EdgeInsets.all(20),
+              padding: const EdgeInsets.fromLTRB(20, 22, 20, 0),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -48,8 +33,8 @@ class CustomersScreen extends StatelessWidget {
                       onPressed: appState.isFetchingAllRecordings
                           ? null
                           : () async {
-                              final matches =
-                                  await appState.fetchRecordingsForAllCustomers();
+                              final matches = await appState
+                                  .fetchRecordingsForAllCustomers();
 
                               if (!context.mounted) return;
 
@@ -64,13 +49,13 @@ class CustomersScreen extends StatelessWidget {
                               );
                             },
                       style: FilledButton.styleFrom(
-                        backgroundColor: const Color(0xFF554B42),
+                        backgroundColor: AppColors.primary,
                         foregroundColor: Colors.white,
-                        disabledBackgroundColor: const Color(0xFFB5ACA4),
+                        disabledBackgroundColor: AppColors.border,
                         shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
+                          borderRadius: BorderRadius.circular(12),
                         ),
-                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        padding: const EdgeInsets.symmetric(vertical: 15),
                       ),
                       icon: Icon(
                         appState.isFetchingAllRecordings
@@ -83,53 +68,59 @@ class CustomersScreen extends StatelessWidget {
                             ? 'Fetching recordings...'
                             : 'Fetch All Recordings',
                         style: const TextStyle(
-                          fontFamily: 'Open Sans',
-                          fontWeight: FontWeight.w600,
+                          fontFamily: 'Bubblegum Sans',
+                          fontWeight: FontWeight.w400,
                         ),
                       ),
                     ),
                   ),
-                  const SizedBox(height: 20),
-                  const Text(
-                    'CUSTOMER CALLS',
-                    style: TextStyle(
-                      color: Colors.grey,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w500,
+                  const SizedBox(height: 26),
+                  SectionLabel(
+                    'Customer calls',
+                    trailing: Text(
+                      '${appState.customers.length} contacts',
+                      style: const TextStyle(
+                        color: AppColors.subtle,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w400,
+                      ),
                     ),
                   ),
                   const SizedBox(height: 12),
                   Expanded(
-                    child: ListView.separated(
-                      itemCount: appState.customers.length,
-                      separatorBuilder: (_, _) => const SizedBox(height: 12),
-                      itemBuilder: (context, index) {
-                        final customer = appState.customers[index];
-                        return _CustomerCard(
-                          customer: customer,
-                          onCallTap: () async {
-                            final didOpen = await appState.dialCustomer(
-                              customer,
-                            );
+                    child: appState.customers.isEmpty
+                        ? const _EmptyCustomersState()
+                        : ListView.separated(
+                            itemCount: appState.customers.length,
+                            separatorBuilder: (_, _) =>
+                                const SizedBox(height: 12),
+                            itemBuilder: (context, index) {
+                              final customer = appState.customers[index];
+                              return _CustomerCard(
+                                customer: customer,
+                                onCallTap: () async {
+                                  final didOpen = await appState.dialCustomer(
+                                    customer,
+                                  );
 
-                            if (!context.mounted || didOpen) return;
+                                  if (!context.mounted || didOpen) return;
 
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text(
-                                  'Unable to open dialer right now.',
-                                ),
-                              ),
-                            );
-                          },
-                          onPlayTap: customer.latestRecording == null
-                              ? null
-                              : () => appState.playRecording(
-                                  customer.latestRecording!,
-                                ),
-                        );
-                      },
-                    ),
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text(
+                                        'Unable to open dialer right now.',
+                                      ),
+                                    ),
+                                  );
+                                },
+                                onPlayTap: customer.latestRecording == null
+                                    ? null
+                                    : () => appState.playRecording(
+                                        customer.latestRecording!,
+                                      ),
+                              );
+                            },
+                          ),
                   ),
                 ],
               ),
@@ -146,6 +137,35 @@ class CustomersScreen extends StatelessWidget {
   }
 }
 
+class _EmptyCustomersState extends StatelessWidget {
+  const _EmptyCustomersState();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: AppSurfaces.placeholder(radius: 16),
+      child: const Row(
+        children: [
+          Icon(Icons.people_outline_rounded, color: AppColors.subtle, size: 22),
+          SizedBox(width: 13),
+          Expanded(
+            child: Text(
+              'Customer contacts will appear here when they are available.',
+              style: TextStyle(
+                color: AppColors.muted,
+                fontSize: 13,
+                height: 1.4,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _SummaryCard extends StatelessWidget {
   final int recordingsReadyCount;
 
@@ -155,33 +175,68 @@ class _SummaryCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
-      height: 164,
-      decoration: BoxDecoration(
-        color: const Color(0xFFE17C0F),
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+      height: 156,
+      decoration: AppSurfaces.card(radius: 18),
+      child: Row(
         children: [
-          const Text(
-            'Customers Ready',
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: 18,
-              fontWeight: FontWeight.w500,
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.all(22),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Text(
+                    'RECORDINGS AVAILABLE',
+                    style: TextStyle(
+                      color: AppColors.primaryDark,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w400,
+                      letterSpacing: 1.1,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    '$recordingsReadyCount',
+                    style: const TextStyle(
+                      color: AppColors.ink,
+                      fontSize: 42,
+                      height: 1,
+                      fontWeight: FontWeight.w400,
+                      letterSpacing: -1.2,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Customers ready to review',
+                    style: TextStyle(
+                      color: AppColors.muted,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w400,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
-          Text(
-            '$recordingsReadyCount',
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 50,
-              fontWeight: FontWeight.bold,
+          Padding(
+            padding: const EdgeInsets.only(right: 22),
+            child: Container(
+              width: 54,
+              height: 54,
+              decoration: BoxDecoration(
+                color: AppColors.primarySoft,
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Image.asset(
+                'lib/fonts/customer-service-headset.png',
+                width: 25,
+                height: 25,
+                color: AppColors.primary,
+                filterQuality: FilterQuality.high,
+                semanticLabel: 'Customer service headset',
+              ),
             ),
-          ),
-          const Text(
-            'Recordings Available',
-            style: TextStyle(color: Colors.white, fontSize: 18),
           ),
         ],
       ),
@@ -203,12 +258,8 @@ class _CustomerCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border.all(color: const Color(0xFFE0E0E0)),
-        borderRadius: BorderRadius.circular(10),
-      ),
+      padding: const EdgeInsets.all(17),
+      decoration: AppSurfaces.card(radius: 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -218,16 +269,16 @@ class _CustomerCard extends StatelessWidget {
                 width: 48,
                 height: 48,
                 decoration: BoxDecoration(
-                  color: const Color(0xFFFFF1E3),
-                  borderRadius: BorderRadius.circular(12),
+                  color: AppColors.primarySoft,
+                  borderRadius: BorderRadius.circular(14),
                 ),
                 child: Center(
                   child: Text(
                     _initials(customer.name),
                     style: const TextStyle(
-                      color: Color(0xFFE17C0F),
+                      color: AppColors.primary,
                       fontSize: 16,
-                      fontWeight: FontWeight.w700,
+                      fontWeight: FontWeight.w400,
                     ),
                   ),
                 ),
@@ -240,28 +291,28 @@ class _CustomerCard extends StatelessWidget {
                     Text(
                       customer.name,
                       style: const TextStyle(
-                        fontFamily: 'Open Sans',
+                        fontFamily: 'Bubblegum Sans',
                         fontSize: 16,
-                        fontWeight: FontWeight.w700,
-                        color: Color(0xFF554B42),
+                        fontWeight: FontWeight.w400,
+                        color: AppColors.ink,
                       ),
                     ),
                     const SizedBox(height: 4),
                     Text(
                       customer.phoneNumber,
                       style: const TextStyle(
-                        fontFamily: 'Open Sans',
+                        fontFamily: 'Bubblegum Sans',
                         fontSize: 13,
-                        color: Color(0xFF7A7067),
+                        color: AppColors.muted,
                       ),
                     ),
                     const SizedBox(height: 2),
                     Text(
                       customer.subtitle,
                       style: const TextStyle(
-                        fontFamily: 'Open Sans',
+                        fontFamily: 'Bubblegum Sans',
                         fontSize: 12,
-                        color: Colors.grey,
+                        color: AppColors.subtle,
                       ),
                     ),
                   ],
@@ -270,10 +321,10 @@ class _CustomerCard extends StatelessWidget {
               FilledButton(
                 onPressed: onCallTap,
                 style: FilledButton.styleFrom(
-                  backgroundColor: const Color(0xFFE17C0F),
+                  backgroundColor: AppColors.primary,
                   foregroundColor: Colors.white,
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
+                    borderRadius: BorderRadius.circular(12),
                   ),
                   padding: const EdgeInsets.symmetric(
                     horizontal: 18,
@@ -283,8 +334,8 @@ class _CustomerCard extends StatelessWidget {
                 child: const Text(
                   'Call',
                   style: TextStyle(
-                    fontFamily: 'Open Sans',
-                    fontWeight: FontWeight.w600,
+                    fontFamily: 'Bubblegum Sans',
+                    fontWeight: FontWeight.w400,
                   ),
                 ),
               ),
@@ -297,17 +348,17 @@ class _CustomerCard extends StatelessWidget {
                   ? 'Latest recording matched automatically'
                   : '${customer.matchingRecordingsCount} matching recordings found',
               style: const TextStyle(
-                fontFamily: 'Open Sans',
+                fontFamily: 'Bubblegum Sans',
                 fontSize: 12,
-                color: Color(0xFF7A7067),
+                color: AppColors.muted,
               ),
             ),
           const SizedBox(height: 14),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             decoration: BoxDecoration(
-              color: const Color(0xFFF8F6F4),
-              borderRadius: BorderRadius.circular(8),
+              color: AppColors.surfaceMuted,
+              borderRadius: BorderRadius.circular(11),
             ),
             child: Row(
               children: [
@@ -317,18 +368,18 @@ class _CustomerCard extends StatelessWidget {
                       : Icons.fiber_manual_record_rounded,
                   size: 16,
                   color: customer.isCallInProgress
-                      ? const Color(0xFFE17C0F)
-                      : const Color(0xFF8F867D),
+                      ? AppColors.primary
+                      : AppColors.subtle,
                 ),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
                     customer.statusLabel,
                     style: const TextStyle(
-                      fontFamily: 'Open Sans',
+                      fontFamily: 'Bubblegum Sans',
                       fontSize: 13,
-                      fontWeight: FontWeight.w600,
-                      color: Color(0xFF554B42),
+                      fontWeight: FontWeight.w400,
+                      color: AppColors.ink,
                     ),
                   ),
                 ),
@@ -376,19 +427,15 @@ class _RecordingPanel extends StatelessWidget {
       return Container(
         width: double.infinity,
         padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: const Color(0xFFFFFBF7),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: const Color(0xFFF0E1D1)),
-        ),
+        decoration: AppSurfaces.placeholder(radius: 12),
         child: Text(
           lastCallEndedAt == null
               ? 'Call a customer and the recording will appear here.'
               : 'Call started at ${_formatDateTime(lastCallStartedAt ?? lastCallEndedAt!)}. Last call ended at ${_formatDateTime(lastCallEndedAt!)}. No recording matched that call window.',
           style: const TextStyle(
-            fontFamily: 'Open Sans',
+            fontFamily: 'Bubblegum Sans',
             fontSize: 13,
-            color: Color(0xFF7A7067),
+            color: AppColors.muted,
           ),
         ),
       );
@@ -397,10 +444,7 @@ class _RecordingPanel extends StatelessWidget {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: const Color(0xFF554B42),
-        borderRadius: BorderRadius.circular(8),
-      ),
+      decoration: AppSurfaces.placeholder(radius: 12),
       child: Row(
         children: [
           InkWell(
@@ -410,7 +454,7 @@ class _RecordingPanel extends StatelessWidget {
               width: 40,
               height: 40,
               decoration: const BoxDecoration(
-                color: Color(0xFFE17C0F),
+                color: AppColors.primary,
                 shape: BoxShape.circle,
               ),
               child: const Icon(
@@ -429,9 +473,9 @@ class _RecordingPanel extends StatelessWidget {
                   Text(
                     'Call time ${_formatDateTime(lastCallStartedAt!)}',
                     style: const TextStyle(
-                      fontFamily: 'Open Sans',
+                      fontFamily: 'Bubblegum Sans',
                       fontSize: 12,
-                      color: Colors.white70,
+                      color: AppColors.muted,
                     ),
                   ),
                 if (lastCallStartedAt != null) const SizedBox(height: 4),
@@ -440,19 +484,19 @@ class _RecordingPanel extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
-                    fontFamily: 'Open Sans',
+                    fontFamily: 'Bubblegum Sans',
                     fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.white,
+                    fontWeight: FontWeight.w400,
+                    color: AppColors.ink,
                   ),
                 ),
                 const SizedBox(height: 4),
                 Text(
                   _formatDateTime(recording!.lastModifiedTime),
                   style: const TextStyle(
-                    fontFamily: 'Open Sans',
+                    fontFamily: 'Bubblegum Sans',
                     fontSize: 12,
-                    color: Colors.white70,
+                    color: AppColors.muted,
                   ),
                 ),
               ],
