@@ -132,7 +132,21 @@ class _FakeCallPersistence implements CallPersistence {
   final List<Map<String, dynamic>> savedCalls = [];
 
   @override
+  Future<Map<String, dynamic>?> getCall(String sessionId) async {
+    for (final call in savedCalls.reversed) {
+      if (call['session_id'] == sessionId) return call;
+    }
+    return null;
+  }
+
+  @override
   Future<void> saveCall(Map<String, dynamic> call) async {
     savedCalls.add(Map<String, dynamic>.from(call));
+  }
+
+  @override
+  Future<void> updateStatus(String sessionId, String status) async {
+    final call = await getCall(sessionId);
+    call?['status'] = status;
   }
 }

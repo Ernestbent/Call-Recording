@@ -1,7 +1,6 @@
 import 'package:calls_recording/services/customer_call_store.dart';
 import 'package:calls_recording/models/customer_contact.dart';
 import 'package:calls_recording/theme/app_theme.dart';
-import 'package:calls_recording/widgets/company_logo.dart';
 import 'package:calls_recording/widgets/custom_bottom_nav.dart';
 import 'package:calls_recording/widgets/recent_calls.dart';
 import 'package:flutter/material.dart';
@@ -14,16 +13,7 @@ class HomeScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        titleSpacing: 20,
-        title: const Row(
-          children: [
-            CompanyLogo(width: 54, height: 38),
-            SizedBox(width: 12),
-            Text('Call Recorder'),
-          ],
-        ),
-      ),
+      appBar: AppBar(title: const Text('Call Recorder')),
       body: SafeArea(
         child: AnimatedBuilder(
           animation: appState,

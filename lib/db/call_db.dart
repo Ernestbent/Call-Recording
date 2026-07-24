@@ -19,11 +19,7 @@ class CallDatabase {
     Directory dir = await getApplicationDocumentsDirectory();
     final path = join(dir.path, fileName);
 
-    return await openDatabase(
-      path,
-      version: 1,
-      onCreate: _createDB,
-    );
+    return await openDatabase(path, version: 1, onCreate: _createDB);
   }
 
   Future _createDB(Database db, int version) async {
@@ -54,20 +50,24 @@ class CallDatabase {
   //  GET ALL CALLS
   Future<List<Map<String, dynamic>>> getAllCalls() async {
     final db = await database;
-    return await db.query(
-      'calls',
-      orderBy: 'id DESC',
-    );
+    return await db.query('calls', orderBy: 'id DESC');
   }
 
   //  GET PENDING CALLS
   Future<List<Map<String, dynamic>>> getPendingCalls() async {
     final db = await database;
-    return await db.query(
+    return await db.query('calls', where: 'status = ?', whereArgs: ['pending']);
+  }
+
+  Future<Map<String, dynamic>?> getCallBySessionId(String sessionId) async {
+    final db = await database;
+    final rows = await db.query(
       'calls',
-      where: 'status = ?',
-      whereArgs: ['pending'],
+      where: 'session_id = ?',
+      whereArgs: [sessionId],
+      limit: 1,
     );
+    return rows.isEmpty ? null : rows.first;
   }
 
   //  UPDATE STATUS

@@ -2,6 +2,10 @@ import '../db/call_db.dart';
 
 abstract class CallPersistence {
   Future<void> saveCall(Map<String, dynamic> call);
+
+  Future<Map<String, dynamic>?> getCall(String sessionId);
+
+  Future<void> updateStatus(String sessionId, String status);
 }
 
 class CallRepository implements CallPersistence {
@@ -20,6 +24,12 @@ class CallRepository implements CallPersistence {
     return await db.getPendingCalls();
   }
 
+  @override
+  Future<Map<String, dynamic>?> getCall(String sessionId) {
+    return db.getCallBySessionId(sessionId);
+  }
+
+  @override
   Future<void> updateStatus(String sessionId, String status) async {
     await db.updateCallStatus(sessionId, status);
   }

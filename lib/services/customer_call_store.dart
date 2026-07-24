@@ -4,6 +4,7 @@ import 'package:calls_recording/db/call_model.dart';
 import 'package:calls_recording/models/erpnext_session.dart';
 import 'package:calls_recording/repository/call_repository.dart';
 import 'package:calls_recording/services/erpnext_customer_service.dart';
+import 'package:calls_recording/services/recording_upload_service.dart';
 import 'package:calls_recording/services/service_starter.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -15,9 +16,11 @@ class CustomerCallStore extends ChangeNotifier {
   CustomerCallStore({
     CallPersistence? callPersistence,
     DraftPaymentCustomerSource? customerSource,
+    RecordingUploader? recordingUploader,
     List<CustomerContact> initialCustomers = const [],
   }) : _callPersistence = callPersistence ?? CallRepository(),
        _customerSource = customerSource ?? ErpNextCustomerService(),
+       _recordingUploader = recordingUploader ?? HttpRecordingUploader(),
        _customers = List<CustomerContact>.from(initialCustomers) {
     initializePlaybackEvents();
   }
@@ -25,6 +28,7 @@ class CustomerCallStore extends ChangeNotifier {
   final List<CustomerContact> _customers;
   final CallPersistence _callPersistence;
   final DraftPaymentCustomerSource _customerSource;
+  final RecordingUploader _recordingUploader;
   ErpNextSession? _activeErpNextSession;
   String? _queuedPhoneNumber;
   String? _activePhoneNumber;
@@ -33,6 +37,7 @@ class CustomerCallStore extends ChangeNotifier {
   bool _isLoadingCustomers = false;
   bool _isRecordingPlaying = false;
   String? _customerLoadError;
+  String? _lastRecordingUploadError;
 
   void initializePlaybackEvents() {
     ServiceStarter.configurePlaybackEvents(
@@ -55,6 +60,7 @@ class CustomerCallStore extends ChangeNotifier {
   bool get isFetchingAllRecordings => _isFetchingAllRecordings;
   bool get isLoadingCustomers => _isLoadingCustomers;
   String? get customerLoadError => _customerLoadError;
+  String? get lastRecordingUploadError => _lastRecordingUploadError;
 
   int get recordingsReadyCount =>
       _customers.where((customer) => customer.latestRecording != null).length;
@@ -543,7 +549,26 @@ class CustomerCallStore extends ChangeNotifier {
       createdAt: startedAt.toIso8601String(),
     );
 
+    final existingCall = await _callPersistence.getCall(sessionId);
+    if (existingCall?['status'] == 'uploaded') return;
+
     await _callPersistence.saveCall(call.toMap());
+
+    if (!_recordingUploader.isConfigured) return;
+
+    try {
+      await _recordingUploader.upload(
+        call: call,
+        customerId: customer.erpNextCustomerId,
+      );
+      await _callPersistence.updateStatus(sessionId, 'uploaded');
+      _lastRecordingUploadError = null;
+    } on RecordingUploadException catch (error) {
+      _lastRecordingUploadError = error.message;
+    } catch (_) {
+      _lastRecordingUploadError =
+          'Could not upload the recording. It remains pending.';
+    }
   }
 
   String _startedAtKey(String normalizedPhone) =>

@@ -1,13 +1,19 @@
 import 'package:flutter/material.dart';
 import 'package:calls_recording/services/customer_call_store.dart';
+import 'package:calls_recording/services/recording_upload_service.dart';
 import 'package:calls_recording/screens/home_screen.dart';
 import 'package:calls_recording/widgets/custom_bottom_nav.dart';
 import 'package:calls_recording/theme/app_theme.dart';
 
 class SettingsScreen extends StatefulWidget {
   final CustomerCallStore appState;
+  final RecordingUploadSettings? uploadSettings;
 
-  const SettingsScreen({super.key, required this.appState});
+  const SettingsScreen({
+    super.key,
+    required this.appState,
+    this.uploadSettings,
+  });
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -16,14 +22,69 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   bool _autoRecordCalls = true;
   bool _darkMode = false;
-  String _apiUrl = '';
+  bool _isLoadingApiUrl = true;
+  bool _isSavingApiUrl = false;
 
   final TextEditingController _apiUrlController = TextEditingController();
+  late final RecordingUploadSettings _uploadSettings;
 
   @override
   void initState() {
     super.initState();
-    _apiUrlController.text = _apiUrl;
+    _uploadSettings = widget.uploadSettings ?? RecordingUploadSettings();
+    _loadApiUrl();
+  }
+
+  Future<void> _loadApiUrl() async {
+    final endpoint = await _uploadSettings.readEndpoint();
+    if (!mounted) return;
+
+    _apiUrlController.text = endpoint?.toString() ?? '';
+    setState(() {
+      _isLoadingApiUrl = false;
+    });
+  }
+
+  Future<void> _saveApiUrl() async {
+    final endpoint = RecordingUploadSettings.parseEndpoint(
+      _apiUrlController.text,
+    );
+    if (endpoint == null) {
+      _showApiMessage(
+        'Enter a valid HTTP or HTTPS recording API URL.',
+        isError: true,
+      );
+      return;
+    }
+
+    setState(() {
+      _isSavingApiUrl = true;
+    });
+
+    try {
+      await _uploadSettings.saveEndpoint(endpoint.toString());
+      if (!mounted) return;
+      _apiUrlController.text = endpoint.toString();
+      _showApiMessage('Recording API URL saved.');
+    } catch (_) {
+      _showApiMessage('Could not save the recording API URL.', isError: true);
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSavingApiUrl = false;
+        });
+      }
+    }
+  }
+
+  void _showApiMessage(String message, {bool isError = false}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: isError ? AppColors.warning : AppColors.success,
+      ),
+    );
   }
 
   @override
@@ -140,33 +201,33 @@ class _SettingsScreenState extends State<SettingsScreen> {
           Expanded(
             child: TextField(
               controller: _apiUrlController,
+              enabled: !_isLoadingApiUrl && !_isSavingApiUrl,
+              keyboardType: TextInputType.url,
+              textInputAction: TextInputAction.done,
+              onSubmitted: (_) => _saveApiUrl(),
               decoration: const InputDecoration(
-                hintText: 'https://127.0.0.1:8002/api/upload/',
+                hintText: 'https://example.ngrok-free.dev/api/recordings',
                 prefixIcon: Icon(Icons.link_rounded),
                 border: InputBorder.none,
                 filled: false,
               ),
               style: const TextStyle(fontSize: 14, color: AppColors.ink),
-              onChanged: (value) {
-                setState(() {
-                  _apiUrl = value;
-                });
-              },
             ),
           ),
           IconButton(
-            icon: const Icon(Icons.check_rounded, size: 19),
+            icon: _isSavingApiUrl
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                      color: Colors.white,
+                      strokeWidth: 2,
+                    ),
+                  )
+                : const Icon(Icons.check_rounded, size: 19),
             color: Colors.white,
             style: IconButton.styleFrom(backgroundColor: AppColors.primary),
-            onPressed: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('API URL saved successfully!'),
-                  duration: Duration(seconds: 2),
-                  backgroundColor: AppColors.success,
-                ),
-              );
-            },
+            onPressed: _isLoadingApiUrl || _isSavingApiUrl ? null : _saveApiUrl,
           ),
         ],
       ),

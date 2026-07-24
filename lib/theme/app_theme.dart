@@ -11,6 +11,7 @@ abstract final class AppColors {
   static const Color surface = Color(0xFFFFFFFF);
   static const Color surfaceMuted = Color(0xFFEDEEF1);
   static const Color border = Color(0xFFEEECE9);
+  static const Color cardBorder = Color(0xFFE1DDD8);
   static const Color darkSurface = Color(0xFF554B42);
   static const Color success = Color(0xFF2E7D5B);
   static const Color successSoft = Color(0xFFEAF6F0);
@@ -20,7 +21,13 @@ abstract final class AppColors {
 
 abstract final class AppShadows {
   static const List<BoxShadow> card = [
-    BoxShadow(color: Color(0x242D2824), blurRadius: 18, offset: Offset(0, 6)),
+    BoxShadow(color: Color(0x1F2D2824), blurRadius: 8, offset: Offset(0, 2)),
+    BoxShadow(
+      color: Color(0x302D2824),
+      blurRadius: 24,
+      spreadRadius: -2,
+      offset: Offset(0, 10),
+    ),
   ];
 
   static const List<BoxShadow> navigation = [
@@ -37,6 +44,7 @@ abstract final class AppSurfaces {
     return BoxDecoration(
       color: color,
       borderRadius: BorderRadius.circular(radius),
+      border: Border.all(color: AppColors.cardBorder),
       boxShadow: elevated ? AppShadows.card : null,
     );
   }
@@ -67,10 +75,14 @@ abstract final class AppTheme {
       appBarTheme: const AppBarTheme(
         elevation: 0,
         scrolledUnderElevation: 0,
-        backgroundColor: AppColors.canvas,
+        backgroundColor: AppColors.surface,
+        surfaceTintColor: Colors.transparent,
         foregroundColor: AppColors.ink,
-        centerTitle: false,
+        centerTitle: true,
         toolbarHeight: 72,
+        shape: Border(
+          bottom: BorderSide(color: AppColors.cardBorder, width: 1),
+        ),
         titleTextStyle: TextStyle(
           color: AppColors.ink,
           fontFamily: 'Bubblegum Sans',
