@@ -1,8 +1,13 @@
 import '../db/call_db.dart';
 
-class CallRepository {
+abstract class CallPersistence {
+  Future<void> saveCall(Map<String, dynamic> call);
+}
+
+class CallRepository implements CallPersistence {
   final db = CallDatabase.instance;
 
+  @override
   Future<void> saveCall(Map<String, dynamic> call) async {
     await db.insertCall(call);
   }

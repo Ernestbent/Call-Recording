@@ -1,5 +1,7 @@
 import 'package:calls_recording/models/call_recording_file.dart';
 import 'package:calls_recording/models/customer_contact.dart';
+import 'package:calls_recording/db/call_model.dart';
+import 'package:calls_recording/repository/call_repository.dart';
 import 'package:calls_recording/services/service_starter.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -8,8 +10,9 @@ class CustomerCallStore extends ChangeNotifier {
   static const Duration _recordingWindowStartOffset = Duration(seconds: 30);
   static const Duration _recordingWindowDuration = Duration(minutes: 2);
 
-  CustomerCallStore()
-    : _customers = [
+  CustomerCallStore({CallPersistence? callPersistence})
+    : _callPersistence = callPersistence ?? CallRepository(),
+      _customers = [
         const CustomerContact(
           name: 'Othieno Benedict Ernest',
           phoneNumber: '+256 772545948',
@@ -28,12 +31,24 @@ class CustomerCallStore extends ChangeNotifier {
           subtitle: 'New lead',
           statusLabel: 'Ready to call',
         ),
-      ];
+      ] {
+    initializePlaybackEvents();
+  }
 
   final List<CustomerContact> _customers;
+  final CallPersistence _callPersistence;
   String? _queuedPhoneNumber;
   String? _activePhoneNumber;
+  String? _activeRecordingPath;
   bool _isFetchingAllRecordings = false;
+  bool _isRecordingPlaying = false;
+
+  void initializePlaybackEvents() {
+    ServiceStarter.configurePlaybackEvents(
+      onCompleted: _handlePlaybackEnded,
+      onFailed: _handlePlaybackEnded,
+    );
+  }
 
   Future<void> hydrate() async {
     final prefs = await SharedPreferences.getInstance();
@@ -66,6 +81,12 @@ class CustomerCallStore extends ChangeNotifier {
 
   int get recordingsReadyCount =>
       _customers.where((customer) => customer.latestRecording != null).length;
+
+  bool isActiveRecording(CallRecordingFile recording) =>
+      _activeRecordingPath == recording.filePath;
+
+  bool isPlayingRecording(CallRecordingFile recording) =>
+      isActiveRecording(recording) && _isRecordingPlaying;
 
   Future<bool> dialCustomer(CustomerContact customer) async {
     _queuedPhoneNumber = _normalize(customer.phoneNumber);
@@ -111,11 +132,11 @@ class CustomerCallStore extends ChangeNotifier {
     _persistCallTimestamps(phoneNumber: resolvedNumber, startedAt: startedAt);
   }
 
-  void markCallCompleted({
+  Future<void> markCallCompleted({
     String? phoneNumber,
     required DateTime callEndedAt,
     CallRecordingFile? recording,
-  }) {
+  }) async {
     final resolvedNumber = _resolvePhoneNumber(phoneNumber);
     if (resolvedNumber == null) return;
 
@@ -127,13 +148,24 @@ class CustomerCallStore extends ChangeNotifier {
             : 'Recording ready',
         lastCallEndedAt: callEndedAt,
         latestRecording: recording,
+        availableRecordings: recording == null ? const [] : [recording],
         matchingRecordingsCount: recording == null ? 0 : 1,
         clearRecording: recording == null,
         isCallQueued: false,
         isCallInProgress: false,
       ),
     );
-    _persistCallTimestamps(phoneNumber: resolvedNumber, endedAt: callEndedAt);
+    await _persistCallTimestamps(
+      phoneNumber: resolvedNumber,
+      endedAt: callEndedAt,
+    );
+
+    if (recording != null) {
+      final customer = _customerForPhone(resolvedNumber);
+      if (customer != null) {
+        await _saveMatchedRecording(customer: customer, recording: recording);
+      }
+    }
 
     _queuedPhoneNumber = null;
     _activePhoneNumber = null;
@@ -159,8 +191,37 @@ class CustomerCallStore extends ChangeNotifier {
     );
   }
 
-  Future<void> playRecording(CallRecordingFile recording) async {
-    await ServiceStarter.playRecording(recording.filePath);
+  Future<bool> playRecording(CallRecordingFile recording) {
+    return toggleRecordingPlayback(recording);
+  }
+
+  Future<bool> toggleRecordingPlayback(CallRecordingFile recording) async {
+    final isCurrentRecording = isActiveRecording(recording);
+    if (isCurrentRecording && _isRecordingPlaying) {
+      final didPause = await ServiceStarter.pauseRecording();
+      if (didPause) {
+        _isRecordingPlaying = false;
+        notifyListeners();
+      }
+      return didPause;
+    }
+
+    if (isCurrentRecording) {
+      final didResume = await ServiceStarter.resumeRecording();
+      if (didResume) {
+        _isRecordingPlaying = true;
+        notifyListeners();
+      }
+      return didResume;
+    }
+
+    final didStart = await ServiceStarter.playRecording(recording.filePath);
+    if (didStart) {
+      _activeRecordingPath = recording.filePath;
+      _isRecordingPlaying = true;
+      notifyListeners();
+    }
+    return didStart;
   }
 
   Future<int> fetchRecordingsForAllCustomers() async {
@@ -187,7 +248,8 @@ class CustomerCallStore extends ChangeNotifier {
           customer.phoneNumber,
         );
 
-        final currentCustomer = _customerForPhone(customer.phoneNumber) ?? customer;
+        final currentCustomer =
+            _customerForPhone(customer.phoneNumber) ?? customer;
         final matchingRecordings = _recordingsMatchingCallWindow(
           currentCustomer,
           recordings,
@@ -197,15 +259,22 @@ class CustomerCallStore extends ChangeNotifier {
             : matchingRecordings.first;
         if (latestRecording != null) {
           matchedCustomers++;
+          await _saveMatchedRecording(
+            customer: currentCustomer,
+            recording: latestRecording,
+          );
         }
 
         _updateCustomer(
           customer.phoneNumber,
           (current) => current.copyWith(
             statusLabel: latestRecording == null
-                ? 'No recordings matched the last call time'
-                : 'Recording ready',
+                ? current.lastCallStartedAt == null
+                      ? 'No call has been started from this app'
+                      : 'No recordings matched the last app call'
+                : '${matchingRecordings.length} recording${matchingRecordings.length == 1 ? '' : 's'} matched the last app call',
             latestRecording: latestRecording,
+            availableRecordings: matchingRecordings,
             matchingRecordingsCount: matchingRecordings.length,
             clearRecording: latestRecording == null,
             isCallQueued: false,
@@ -284,29 +353,33 @@ class CustomerCallStore extends ChangeNotifier {
     ).subtract(_recordingWindowStartOffset);
     final minuteEnd = minuteStart.add(_recordingWindowDuration);
 
-    final matches = recordings.where((recording) {
-      final effectiveTimestamp = recording.effectiveTimestamp;
-      final modifiedTimestamp = recording.lastModifiedTime;
+    final matches =
+        recordings.where((recording) {
+          final effectiveTimestamp = recording.effectiveTimestamp;
+          final modifiedTimestamp = recording.lastModifiedTime;
 
-      return _timestampInWindow(effectiveTimestamp, minuteStart, minuteEnd) ||
-          _timestampInWindow(modifiedTimestamp, minuteStart, minuteEnd);
-    }).toList()
-      ..sort((a, b) {
-        final aDelta =
-            a.effectiveTimestamp.difference(callStartedAt).inSeconds.abs();
-        final bDelta =
-            b.effectiveTimestamp.difference(callStartedAt).inSeconds.abs();
-        return aDelta.compareTo(bDelta);
-      });
+          return _timestampInWindow(
+                effectiveTimestamp,
+                minuteStart,
+                minuteEnd,
+              ) ||
+              _timestampInWindow(modifiedTimestamp, minuteStart, minuteEnd);
+        }).toList()..sort((a, b) {
+          final aDelta = a.effectiveTimestamp
+              .difference(callStartedAt)
+              .inSeconds
+              .abs();
+          final bDelta = b.effectiveTimestamp
+              .difference(callStartedAt)
+              .inSeconds
+              .abs();
+          return aDelta.compareTo(bDelta);
+        });
 
     return matches;
   }
 
-  bool _timestampInWindow(
-    DateTime timestamp,
-    DateTime start,
-    DateTime end,
-  ) {
+  bool _timestampInWindow(DateTime timestamp, DateTime start, DateTime end) {
     return !timestamp.isBefore(start) && timestamp.isBefore(end);
   }
 
@@ -353,9 +426,45 @@ class CustomerCallStore extends ChangeNotifier {
     }
   }
 
+  Future<void> _saveMatchedRecording({
+    required CustomerContact customer,
+    required CallRecordingFile recording,
+  }) async {
+    final startedAt = customer.lastCallStartedAt;
+    if (startedAt == null) return;
+
+    final endedAt = customer.lastCallEndedAt ?? recording.lastModifiedTime;
+    final durationSeconds = endedAt.isAfter(startedAt)
+        ? endedAt.difference(startedAt).inSeconds
+        : 0;
+    final normalizedPhone =
+        _normalize(customer.phoneNumber) ?? customer.phoneNumber;
+    final sessionId =
+        'call_${normalizedPhone.replaceAll(RegExp(r"[^0-9]"), "")}_${startedAt.millisecondsSinceEpoch}';
+
+    final call = CallModel(
+      sessionId: sessionId,
+      phoneNumber: customer.phoneNumber,
+      callType: 'outgoing',
+      duration: durationSeconds,
+      audioPath: recording.filePath,
+      status: 'pending',
+      createdAt: startedAt.toIso8601String(),
+    );
+
+    await _callPersistence.saveCall(call.toMap());
+  }
+
   String _startedAtKey(String normalizedPhone) =>
       'customer_${normalizedPhone}_last_call_started_at';
 
   String _endedAtKey(String normalizedPhone) =>
       'customer_${normalizedPhone}_last_call_ended_at';
+
+  void _handlePlaybackEnded(String filePath) {
+    if (_activeRecordingPath != filePath) return;
+    _activeRecordingPath = null;
+    _isRecordingPlaying = false;
+    notifyListeners();
+  }
 }

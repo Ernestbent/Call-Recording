@@ -3,26 +3,30 @@ package com.example.calls_recording
 import android.content.ContentUris
 import android.content.Intent
 import android.database.Cursor
+import android.media.AudioAttributes
 import android.media.MediaPlayer
 import android.net.Uri
 import android.provider.MediaStore
 import android.util.Log
-import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
+import java.io.FileInputStream
 import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.TimeZone
 import java.util.concurrent.Executors
 import kotlin.math.abs
 
-class MainActivity : FlutterActivity() {
+class MainActivity : FlutterFragmentActivity() {
 
     private val CHANNEL = "call_recorder_service"
     private val TAG = "CALL_RECORD_LOOKUP"
     private val audioExtensions = setOf("mp3", "m4a", "wav")
+    private lateinit var methodChannel: MethodChannel
     private var mediaPlayer: MediaPlayer? = null
+    private var activeRecordingPath: String? = null
     private val recordingLookupExecutor = Executors.newSingleThreadExecutor()
     private val bracketedPhoneRegex = Regex("""\(([^)]*?\d[^)]*)\)""")
     private val fallbackPhoneRegex = Regex("""\d{7,15}""")
@@ -38,8 +42,11 @@ class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL)
-            .setMethodCallHandler { call, result ->
+        methodChannel = MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            CHANNEL
+        )
+        methodChannel.setMethodCallHandler { call, result ->
 
                 when (call.method) {
                     "startService" -> {
@@ -116,8 +123,13 @@ class MainActivity : FlutterActivity() {
                             return@setMethodCallHandler
                         }
 
-                        playRecording(filePath)
-                        result.success(true)
+                        playRecording(filePath, result)
+                    }
+                    "pauseRecording" -> {
+                        pauseRecording(result)
+                    }
+                    "resumeRecording" -> {
+                        resumeRecording(result)
                     }
                     else -> result.notImplemented()
                 }
@@ -710,29 +722,167 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    private fun playRecording(filePath: String) {
-        mediaPlayer?.stop()
-        mediaPlayer?.release()
+    private fun playRecording(filePath: String, result: MethodChannel.Result) {
+        releaseMediaPlayer()
 
-        mediaPlayer = MediaPlayer().apply {
-            if (filePath.startsWith("content://")) {
-                setDataSource(this@MainActivity, Uri.parse(filePath))
-            } else {
-                setDataSource(filePath)
-            }
-            prepare()
-            start()
-            setOnCompletionListener {
-                it.release()
-                mediaPlayer = null
+        val player = MediaPlayer()
+        mediaPlayer = player
+        activeRecordingPath = filePath
+        var resultDelivered = false
+
+        fun reportError(message: String, details: String? = null) {
+            Log.e(TAG, "$message path=$filePath details=${details ?: "none"}")
+            if (!resultDelivered) {
+                resultDelivered = true
+                result.error("PLAYBACK_FAILED", message, details)
             }
         }
+
+        try {
+            player.setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                    .build()
+            )
+            player.setOnPreparedListener {
+                if (mediaPlayer !== it) return@setOnPreparedListener
+
+                it.start()
+                Log.d(
+                    TAG,
+                    "Playback started path=$filePath durationMs=${it.duration}"
+                )
+                if (!resultDelivered) {
+                    resultDelivered = true
+                    result.success(true)
+                }
+            }
+            player.setOnCompletionListener {
+                Log.d(TAG, "Playback completed path=$filePath")
+                methodChannel.invokeMethod(
+                    "playbackCompleted",
+                    mapOf("filePath" to filePath)
+                )
+                if (mediaPlayer === it) {
+                    releaseMediaPlayer()
+                } else {
+                    it.release()
+                }
+            }
+            player.setOnErrorListener { failedPlayer, what, extra ->
+                reportError(
+                    message = "Android could not play this recording.",
+                    details = "MediaPlayer error what=$what extra=$extra"
+                )
+                if (resultDelivered) {
+                    methodChannel.invokeMethod(
+                        "playbackFailed",
+                        mapOf("filePath" to filePath)
+                    )
+                }
+                if (mediaPlayer === failedPlayer) {
+                    releaseMediaPlayer()
+                } else {
+                    failedPlayer.release()
+                }
+                true
+            }
+
+            if (filePath.startsWith("content://")) {
+                val descriptor = contentResolver.openAssetFileDescriptor(
+                    Uri.parse(filePath),
+                    "r"
+                ) ?: throw IllegalArgumentException("Recording could not be opened")
+
+                descriptor.use {
+                    if (it.length >= 0) {
+                        player.setDataSource(
+                            it.fileDescriptor,
+                            it.startOffset,
+                            it.length
+                        )
+                    } else {
+                        player.setDataSource(it.fileDescriptor)
+                    }
+                }
+            } else {
+                val recordingFile = File(filePath)
+                if (!recordingFile.exists() || !recordingFile.isFile) {
+                    throw IllegalArgumentException("Recording file does not exist")
+                }
+                if (!recordingFile.canRead() || recordingFile.length() == 0L) {
+                    throw IllegalArgumentException("Recording file is not readable")
+                }
+
+                FileInputStream(recordingFile).use {
+                    player.setDataSource(it.fd)
+                }
+            }
+
+            player.prepareAsync()
+        } catch (error: Exception) {
+            reportError(
+                message = "Unable to open this recording.",
+                details = error.message
+            )
+            releaseMediaPlayer()
+        }
+    }
+
+    private fun pauseRecording(result: MethodChannel.Result) {
+        val player = mediaPlayer
+        if (player == null) {
+            result.error("NO_ACTIVE_PLAYBACK", "No recording is playing.", null)
+            return
+        }
+
+        try {
+            if (player.isPlaying) {
+                player.pause()
+            }
+            Log.d(TAG, "Playback paused path=$activeRecordingPath")
+            result.success(true)
+        } catch (error: IllegalStateException) {
+            result.error("PAUSE_FAILED", "Unable to pause this recording.", error.message)
+        }
+    }
+
+    private fun resumeRecording(result: MethodChannel.Result) {
+        val player = mediaPlayer
+        if (player == null) {
+            result.error("NO_ACTIVE_PLAYBACK", "No recording is paused.", null)
+            return
+        }
+
+        try {
+            player.start()
+            Log.d(TAG, "Playback resumed path=$activeRecordingPath")
+            result.success(true)
+        } catch (error: IllegalStateException) {
+            result.error("RESUME_FAILED", "Unable to resume this recording.", error.message)
+        }
+    }
+
+    private fun releaseMediaPlayer() {
+        mediaPlayer?.let { player ->
+            try {
+                if (player.isPlaying) {
+                    player.stop()
+                }
+            } catch (_: IllegalStateException) {
+                // The player may still be preparing.
+            }
+            player.reset()
+            player.release()
+        }
+        mediaPlayer = null
+        activeRecordingPath = null
     }
 
     override fun onDestroy() {
         recordingLookupExecutor.shutdown()
-        mediaPlayer?.release()
-        mediaPlayer = null
+        releaseMediaPlayer()
         super.onDestroy()
     }
 

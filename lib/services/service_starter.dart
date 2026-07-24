@@ -1,14 +1,39 @@
 import 'package:calls_recording/models/call_recording_file.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 class ServiceStarter {
   static const platform = MethodChannel('call_recorder_service');
+  static void Function(String filePath)? _onPlaybackCompleted;
+  static void Function(String filePath)? _onPlaybackFailed;
+
+  static void configurePlaybackEvents({
+    required void Function(String filePath) onCompleted,
+    required void Function(String filePath) onFailed,
+  }) {
+    _onPlaybackCompleted = onCompleted;
+    _onPlaybackFailed = onFailed;
+    platform.setMethodCallHandler((call) async {
+      final arguments = call.arguments;
+      final filePath = arguments is Map
+          ? arguments['filePath']?.toString()
+          : null;
+      if (filePath == null) return;
+
+      switch (call.method) {
+        case 'playbackCompleted':
+          _onPlaybackCompleted?.call(filePath);
+        case 'playbackFailed':
+          _onPlaybackFailed?.call(filePath);
+      }
+    });
+  }
 
   static Future<void> startService() async {
     try {
       await platform.invokeMethod('startService');
     } catch (e) {
-      print("Failed to start service: $e");
+      debugPrint('Failed to start service: $e');
     }
   }
 
@@ -16,7 +41,7 @@ class ServiceStarter {
     try {
       await platform.invokeMethod('stopService');
     } catch (e) {
-      print("Failed to stop service: $e");
+      debugPrint('Failed to stop service: $e');
     }
   }
 
@@ -36,7 +61,7 @@ class ServiceStarter {
       if (result == null) return null;
       return CallRecordingFile.fromMap(result);
     } catch (e) {
-      print("Failed to find recent call recording: $e");
+      debugPrint('Failed to find recent call recording: $e');
       return null;
     }
   }
@@ -57,7 +82,7 @@ class ServiceStarter {
           )
           .toList();
     } catch (e) {
-      print("Failed to find recordings for phone: $e");
+      debugPrint('Failed to find recordings for phone: $e');
       return const [];
     }
   }
@@ -69,16 +94,38 @@ class ServiceStarter {
       });
       return result ?? false;
     } catch (e) {
-      print("Failed to open dialer: $e");
+      debugPrint('Failed to open dialer: $e');
       return false;
     }
   }
 
-  static Future<void> playRecording(String filePath) async {
+  static Future<bool> playRecording(String filePath) async {
     try {
-      await platform.invokeMethod('playRecording', {'filePath': filePath});
+      final didStart = await platform.invokeMethod<bool>('playRecording', {
+        'filePath': filePath,
+      });
+      return didStart ?? false;
     } catch (e) {
-      print("Failed to play recording: $e");
+      debugPrint('Failed to play recording: $e');
+      return false;
+    }
+  }
+
+  static Future<bool> pauseRecording() async {
+    try {
+      return await platform.invokeMethod<bool>('pauseRecording') ?? false;
+    } catch (e) {
+      debugPrint('Failed to pause recording: $e');
+      return false;
+    }
+  }
+
+  static Future<bool> resumeRecording() async {
+    try {
+      return await platform.invokeMethod<bool>('resumeRecording') ?? false;
+    } catch (e) {
+      debugPrint('Failed to resume recording: $e');
+      return false;
     }
   }
 }

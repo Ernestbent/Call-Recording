@@ -79,11 +79,28 @@ class HomeScreen extends StatelessWidget {
                             phoneNumber: customer.name,
                             timeInfo: _buildRecentSubtitle(customer),
                             hasRecording: customer.latestRecording != null,
+                            isPlaying:
+                                customer.latestRecording != null &&
+                                appState.isPlayingRecording(
+                                  customer.latestRecording!,
+                                ),
                             onPlayTap: customer.latestRecording == null
                                 ? null
-                                : () => appState.playRecording(
-                                    customer.latestRecording!,
-                                  ),
+                                : () async {
+                                    final didStart = await appState
+                                        .playRecording(
+                                          customer.latestRecording!,
+                                        );
+                                    if (!context.mounted || didStart) return;
+
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text(
+                                          'Unable to play this recording.',
+                                        ),
+                                      ),
+                                    );
+                                  },
                           ),
                         ),
                       ),

@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:calls_recording/models/call_recording_file.dart';
 import 'package:calls_recording/models/customer_contact.dart';
 import 'package:calls_recording/services/customer_call_store.dart';
@@ -42,8 +44,8 @@ class CustomersScreen extends StatelessWidget {
                                 SnackBar(
                                   content: Text(
                                     matches == 0
-                                        ? 'No customer recordings were found.'
-                                        : 'Fetched recordings for $matches customer${matches == 1 ? '' : 's'}.',
+                                        ? 'No recordings matched calls made from this app.'
+                                        : 'Matched recordings for $matches customer${matches == 1 ? '' : 's'}.',
                                   ),
                                 ),
                               );
@@ -113,11 +115,28 @@ class CustomersScreen extends StatelessWidget {
                                     ),
                                   );
                                 },
-                                onPlayTap: customer.latestRecording == null
-                                    ? null
-                                    : () => appState.playRecording(
-                                        customer.latestRecording!,
+                                onPlayTap: (recording) async {
+                                  final wasPlaying = appState
+                                      .isPlayingRecording(recording);
+                                  final didStart = await appState.playRecording(
+                                    recording,
+                                  );
+                                  if (!context.mounted) return;
+
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text(
+                                        didStart
+                                            ? wasPlaying
+                                                  ? 'Playback paused'
+                                                  : 'Playing ${recording.fileName}'
+                                            : 'Unable to play this recording.',
                                       ),
+                                    ),
+                                  );
+                                },
+                                isActiveRecording: appState.isActiveRecording,
+                                isPlayingRecording: appState.isPlayingRecording,
                               );
                             },
                           ),
@@ -247,12 +266,16 @@ class _SummaryCard extends StatelessWidget {
 class _CustomerCard extends StatelessWidget {
   final CustomerContact customer;
   final VoidCallback onCallTap;
-  final VoidCallback? onPlayTap;
+  final ValueChanged<CallRecordingFile> onPlayTap;
+  final bool Function(CallRecordingFile) isActiveRecording;
+  final bool Function(CallRecordingFile) isPlayingRecording;
 
   const _CustomerCard({
     required this.customer,
     required this.onCallTap,
     required this.onPlayTap,
+    required this.isActiveRecording,
+    required this.isPlayingRecording,
   });
 
   @override
@@ -345,8 +368,8 @@ class _CustomerCard extends StatelessWidget {
           if (customer.matchingRecordingsCount > 0)
             Text(
               customer.matchingRecordingsCount == 1
-                  ? 'Latest recording matched automatically'
-                  : '${customer.matchingRecordingsCount} matching recordings found',
+                  ? '1 recording ready to play'
+                  : '${customer.matchingRecordingsCount} recordings ready to play',
               style: const TextStyle(
                 fontFamily: 'Bubblegum Sans',
                 fontSize: 12,
@@ -388,10 +411,17 @@ class _CustomerCard extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           _RecordingPanel(
-            recording: customer.latestRecording,
+            recordings: customer.availableRecordings.isEmpty
+                ? [
+                    if (customer.latestRecording != null)
+                      customer.latestRecording!,
+                  ]
+                : customer.availableRecordings,
             lastCallStartedAt: customer.lastCallStartedAt,
             lastCallEndedAt: customer.lastCallEndedAt,
             onPlayTap: onPlayTap,
+            isActiveRecording: isActiveRecording,
+            isPlayingRecording: isPlayingRecording,
           ),
         ],
       ),
@@ -409,21 +439,25 @@ class _CustomerCard extends StatelessWidget {
 }
 
 class _RecordingPanel extends StatelessWidget {
-  final CallRecordingFile? recording;
+  final List<CallRecordingFile> recordings;
   final DateTime? lastCallStartedAt;
   final DateTime? lastCallEndedAt;
-  final VoidCallback? onPlayTap;
+  final ValueChanged<CallRecordingFile> onPlayTap;
+  final bool Function(CallRecordingFile) isActiveRecording;
+  final bool Function(CallRecordingFile) isPlayingRecording;
 
   const _RecordingPanel({
-    required this.recording,
+    required this.recordings,
     required this.lastCallStartedAt,
     required this.lastCallEndedAt,
     required this.onPlayTap,
+    required this.isActiveRecording,
+    required this.isPlayingRecording,
   });
 
   @override
   Widget build(BuildContext context) {
-    if (recording == null) {
+    if (recordings.isEmpty) {
       return Container(
         width: double.infinity,
         padding: const EdgeInsets.all(14),
@@ -441,30 +475,83 @@ class _RecordingPanel extends StatelessWidget {
       );
     }
 
+    return Column(
+      children: [
+        for (var index = 0; index < recordings.length; index++) ...[
+          _RecordingRow(
+            recording: recordings[index],
+            lastCallStartedAt: lastCallStartedAt,
+            onPlayTap: () => onPlayTap(recordings[index]),
+            isActive: isActiveRecording(recordings[index]),
+            isPlaying: isPlayingRecording(recordings[index]),
+          ),
+          if (index != recordings.length - 1) const SizedBox(height: 8),
+        ],
+      ],
+    );
+  }
+
+  static String _formatDateTime(DateTime value) {
+    final hour = value.hour.toString().padLeft(2, '0');
+    final minute = value.minute.toString().padLeft(2, '0');
+    final day = value.day.toString().padLeft(2, '0');
+    final month = value.month.toString().padLeft(2, '0');
+    return '$day/$month ${value.year} • $hour:$minute';
+  }
+}
+
+class _RecordingRow extends StatelessWidget {
+  final CallRecordingFile recording;
+  final DateTime? lastCallStartedAt;
+  final VoidCallback onPlayTap;
+  final bool isActive;
+  final bool isPlaying;
+
+  const _RecordingRow({
+    required this.recording,
+    required this.lastCallStartedAt,
+    required this.onPlayTap,
+    required this.isActive,
+    required this.isPlaying,
+  });
+
+  @override
+  Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(14),
-      decoration: AppSurfaces.placeholder(radius: 12),
+      decoration: AppSurfaces.card(
+        color: isActive ? AppColors.primarySoft : AppColors.surfaceMuted,
+        radius: 12,
+        elevated: false,
+      ),
       child: Row(
         children: [
-          InkWell(
-            onTap: onPlayTap,
-            borderRadius: BorderRadius.circular(20),
-            child: Container(
-              width: 40,
-              height: 40,
-              decoration: const BoxDecoration(
-                color: AppColors.primary,
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(
-                Icons.play_arrow_rounded,
-                color: Colors.white,
-                size: 24,
+          Semantics(
+            button: true,
+            label: '${isPlaying ? 'Pause' : 'Play'} ${recording.fileName}',
+            child: InkWell(
+              key: ValueKey('play-recording-${recording.filePath}'),
+              onTap: onPlayTap,
+              borderRadius: BorderRadius.circular(20),
+              child: Container(
+                width: 40,
+                height: 40,
+                decoration: const BoxDecoration(
+                  color: AppColors.primary,
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                  color: Colors.white,
+                  size: 24,
+                ),
               ),
             ),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 10),
+          _AudioWaveform(isActive: isActive, isPlaying: isPlaying),
+          const SizedBox(width: 10),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -480,7 +567,7 @@ class _RecordingPanel extends StatelessWidget {
                   ),
                 if (lastCallStartedAt != null) const SizedBox(height: 4),
                 Text(
-                  recording!.fileName,
+                  recording.fileName,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
@@ -492,7 +579,13 @@ class _RecordingPanel extends StatelessWidget {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  _formatDateTime(recording!.lastModifiedTime),
+                  isPlaying
+                      ? 'Playing • ${_RecordingPanel._formatDateTime(recording.lastModifiedTime)}'
+                      : isActive
+                      ? 'Paused • ${_RecordingPanel._formatDateTime(recording.lastModifiedTime)}'
+                      : _RecordingPanel._formatDateTime(
+                          recording.lastModifiedTime,
+                        ),
                   style: const TextStyle(
                     fontFamily: 'Bubblegum Sans',
                     fontSize: 12,
@@ -513,5 +606,90 @@ class _RecordingPanel extends StatelessWidget {
     final day = value.day.toString().padLeft(2, '0');
     final month = value.month.toString().padLeft(2, '0');
     return '$day/$month ${value.year} • $hour:$minute';
+  }
+}
+
+class _AudioWaveform extends StatefulWidget {
+  final bool isActive;
+  final bool isPlaying;
+
+  const _AudioWaveform({required this.isActive, required this.isPlaying});
+
+  @override
+  State<_AudioWaveform> createState() => _AudioWaveformState();
+}
+
+class _AudioWaveformState extends State<_AudioWaveform>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 850),
+    );
+    _syncAnimation();
+  }
+
+  @override
+  void didUpdateWidget(covariant _AudioWaveform oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.isPlaying != widget.isPlaying) {
+      _syncAnimation();
+    }
+  }
+
+  void _syncAnimation() {
+    if (widget.isPlaying) {
+      _controller.repeat();
+    } else {
+      _controller.stop();
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 54,
+      height: 30,
+      child: AnimatedBuilder(
+        animation: _controller,
+        builder: (context, _) {
+          return Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: List.generate(9, (index) {
+              final restingHeight = 7.0 + (index % 4) * 3.0;
+              final wave = math.sin(
+                (_controller.value * math.pi * 2) + (index * 0.8),
+              );
+              final height = widget.isPlaying
+                  ? 8.0 + wave.abs() * 20.0
+                  : restingHeight;
+
+              return SizedBox(
+                width: 3,
+                height: height,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: widget.isActive
+                        ? AppColors.primary
+                        : AppColors.subtle.withValues(alpha: 0.55),
+                    borderRadius: BorderRadius.circular(99),
+                  ),
+                ),
+              );
+            }),
+          );
+        },
+      ),
+    );
   }
 }

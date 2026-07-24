@@ -8,6 +8,7 @@ class CustomerContact {
   final DateTime? lastCallStartedAt;
   final DateTime? lastCallEndedAt;
   final CallRecordingFile? latestRecording;
+  final List<CallRecordingFile> availableRecordings;
   final int matchingRecordingsCount;
   final bool isCallQueued;
   final bool isCallInProgress;
@@ -20,6 +21,7 @@ class CustomerContact {
     this.lastCallStartedAt,
     this.lastCallEndedAt,
     this.latestRecording,
+    this.availableRecordings = const [],
     this.matchingRecordingsCount = 0,
     this.isCallQueued = false,
     this.isCallInProgress = false,
@@ -33,6 +35,7 @@ class CustomerContact {
     DateTime? lastCallStartedAt,
     DateTime? lastCallEndedAt,
     CallRecordingFile? latestRecording,
+    List<CallRecordingFile>? availableRecordings,
     int? matchingRecordingsCount,
     bool clearRecording = false,
     bool? isCallQueued,
@@ -48,6 +51,9 @@ class CustomerContact {
       latestRecording: clearRecording
           ? null
           : (latestRecording ?? this.latestRecording),
+      availableRecordings: clearRecording
+          ? const []
+          : (availableRecordings ?? this.availableRecordings),
       matchingRecordingsCount:
           matchingRecordingsCount ?? this.matchingRecordingsCount,
       isCallQueued: isCallQueued ?? this.isCallQueued,

@@ -113,7 +113,9 @@ class CallController {
             _lastCallStartedAt ?? await _readPersistedCallStartedAt();
 
         if (lookupPhoneNumber == null || lookupPhoneNumber == 'Unknown') {
-          print('   ⚠️ No resolved phone number available for recording lookup');
+          print(
+            '   ⚠️ No resolved phone number available for recording lookup',
+          );
           return;
         }
 
@@ -169,7 +171,7 @@ class CallController {
           continue;
         }
 
-        customerCallStore.markCallCompleted(
+        await customerCallStore.markCallCompleted(
           phoneNumber: phoneNumber,
           callEndedAt: callEndTime,
           recording: recording,
@@ -187,7 +189,7 @@ class CallController {
         return;
       }
 
-      customerCallStore.markCallCompleted(
+      await customerCallStore.markCallCompleted(
         phoneNumber: phoneNumber,
         callEndedAt: callEndTime,
         recording: null,

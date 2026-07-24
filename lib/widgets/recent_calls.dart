@@ -5,6 +5,7 @@ class RecentCalls extends StatelessWidget {
   final String phoneNumber;
   final String timeInfo;
   final bool hasRecording;
+  final bool isPlaying;
   final VoidCallback? onPlayTap;
 
   const RecentCalls({
@@ -12,6 +13,7 @@ class RecentCalls extends StatelessWidget {
     required this.phoneNumber,
     required this.timeInfo,
     required this.hasRecording,
+    this.isPlaying = false,
     required this.onPlayTap,
   });
 
@@ -86,7 +88,9 @@ class RecentCalls extends StatelessWidget {
                 height: 38,
                 child: Icon(
                   hasRecording
-                      ? Icons.play_arrow_rounded
+                      ? isPlaying
+                            ? Icons.pause_rounded
+                            : Icons.play_arrow_rounded
                       : Icons.more_horiz_rounded,
                   color: hasRecording ? Colors.white : accentColor,
                   size: 22,
