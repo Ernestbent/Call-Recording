@@ -15,7 +15,44 @@ class CustomersScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Customers')),
+      appBar: AppBar(
+        title: const Text('Customers'),
+        actions: [
+          AnimatedBuilder(
+            animation: appState,
+            builder: (context, _) {
+              return IconButton(
+                tooltip: 'Refresh ERPNext customers',
+                onPressed: appState.isLoadingCustomers
+                    ? null
+                    : () async {
+                        final count = await appState
+                            .refreshDraftPaymentCustomers();
+                        if (!context.mounted) return;
+
+                        final error = appState.customerLoadError;
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              error ??
+                                  'Loaded $count draft-payment customer${count == 1 ? '' : 's'}.',
+                            ),
+                          ),
+                        );
+                      },
+                icon: appState.isLoadingCustomers
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.refresh_rounded),
+              );
+            },
+          ),
+          const SizedBox(width: 8),
+        ],
+      ),
       body: SafeArea(
         child: AnimatedBuilder(
           animation: appState,
@@ -25,6 +62,14 @@ class CustomersScreen extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  if (appState.isLoadingCustomers) ...[
+                    const LinearProgressIndicator(),
+                    const SizedBox(height: 14),
+                  ],
+                  if (appState.customerLoadError != null) ...[
+                    _CustomerLoadError(message: appState.customerLoadError!),
+                    const SizedBox(height: 14),
+                  ],
                   _SummaryCard(
                     recordingsReadyCount: appState.recordingsReadyCount,
                   ),
@@ -171,11 +216,45 @@ class _EmptyCustomersState extends StatelessWidget {
           SizedBox(width: 13),
           Expanded(
             child: Text(
-              'Customer contacts will appear here when they are available.',
+              'No customers with draft Payment Entries and a mobile number were found.',
               style: TextStyle(
                 color: AppColors.muted,
                 fontSize: 13,
                 height: 1.4,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CustomerLoadError extends StatelessWidget {
+  final String message;
+
+  const _CustomerLoadError({required this.message});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.warningSoft,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.cloud_off_rounded, color: AppColors.warning),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              message,
+              style: const TextStyle(
+                color: AppColors.ink,
+                fontSize: 13,
+                height: 1.35,
               ),
             ),
           ),
@@ -288,23 +367,10 @@ class _CustomerCard extends StatelessWidget {
         children: [
           Row(
             children: [
-              Container(
-                width: 48,
-                height: 48,
-                decoration: BoxDecoration(
-                  color: AppColors.primarySoft,
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: Center(
-                  child: Text(
-                    _initials(customer.name),
-                    style: const TextStyle(
-                      color: AppColors.primary,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w400,
-                    ),
-                  ),
-                ),
+              _CustomerAvatar(
+                name: customer.name,
+                imageUrl: customer.profileImageUrl,
+                imageHeaders: customer.profileImageHeaders,
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -376,39 +442,41 @@ class _CustomerCard extends StatelessWidget {
                 color: AppColors.muted,
               ),
             ),
-          const SizedBox(height: 14),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-            decoration: BoxDecoration(
-              color: AppColors.surfaceMuted,
-              borderRadius: BorderRadius.circular(11),
-            ),
-            child: Row(
-              children: [
-                Icon(
-                  customer.isCallInProgress
-                      ? Icons.phone_in_talk_rounded
-                      : Icons.fiber_manual_record_rounded,
-                  size: 16,
-                  color: customer.isCallInProgress
-                      ? AppColors.primary
-                      : AppColors.subtle,
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    customer.statusLabel,
-                    style: const TextStyle(
-                      fontFamily: 'Bubblegum Sans',
-                      fontSize: 13,
-                      fontWeight: FontWeight.w400,
-                      color: AppColors.ink,
+          if (customer.statusLabel != 'Ready to call') ...[
+            const SizedBox(height: 14),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                color: AppColors.surfaceMuted,
+                borderRadius: BorderRadius.circular(11),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    customer.isCallInProgress
+                        ? Icons.phone_in_talk_rounded
+                        : Icons.fiber_manual_record_rounded,
+                    size: 16,
+                    color: customer.isCallInProgress
+                        ? AppColors.primary
+                        : AppColors.subtle,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      customer.statusLabel,
+                      style: const TextStyle(
+                        fontFamily: 'Bubblegum Sans',
+                        fontSize: 13,
+                        fontWeight: FontWeight.w400,
+                        color: AppColors.ink,
+                      ),
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
+          ],
           const SizedBox(height: 12),
           _RecordingPanel(
             recordings: customer.availableRecordings.isEmpty
@@ -430,11 +498,57 @@ class _CustomerCard extends StatelessWidget {
 
   static String _initials(String name) {
     final parts = name.trim().split(RegExp(r'\s+'));
+    if (parts.isEmpty || parts.first.isEmpty) return '?';
     if (parts.length == 1) {
       return parts.first.substring(0, 1).toUpperCase();
     }
     return '${parts.first.substring(0, 1)}${parts.last.substring(0, 1)}'
         .toUpperCase();
+  }
+}
+
+class _CustomerAvatar extends StatelessWidget {
+  final String name;
+  final String? imageUrl;
+  final Map<String, String> imageHeaders;
+
+  const _CustomerAvatar({
+    required this.name,
+    required this.imageUrl,
+    required this.imageHeaders,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final fallback = Center(
+      child: Text(
+        _CustomerCard._initials(name),
+        style: const TextStyle(
+          color: AppColors.primary,
+          fontSize: 16,
+          fontWeight: FontWeight.w400,
+        ),
+      ),
+    );
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(14),
+      child: ColoredBox(
+        color: AppColors.primarySoft,
+        child: SizedBox(
+          width: 48,
+          height: 48,
+          child: imageUrl == null
+              ? fallback
+              : Image.network(
+                  imageUrl!,
+                  headers: imageHeaders,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, _, _) => fallback,
+                ),
+        ),
+      ),
+    );
   }
 }
 

@@ -1,7 +1,9 @@
 import 'package:calls_recording/models/call_recording_file.dart';
 import 'package:calls_recording/models/customer_contact.dart';
 import 'package:calls_recording/db/call_model.dart';
+import 'package:calls_recording/models/erpnext_session.dart';
 import 'package:calls_recording/repository/call_repository.dart';
+import 'package:calls_recording/services/erpnext_customer_service.dart';
 import 'package:calls_recording/services/service_starter.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -10,38 +12,27 @@ class CustomerCallStore extends ChangeNotifier {
   static const Duration _recordingWindowStartOffset = Duration(seconds: 30);
   static const Duration _recordingWindowDuration = Duration(minutes: 2);
 
-  CustomerCallStore({CallPersistence? callPersistence})
-    : _callPersistence = callPersistence ?? CallRepository(),
-      _customers = [
-        const CustomerContact(
-          name: 'Othieno Benedict Ernest',
-          phoneNumber: '+256 772545948',
-          subtitle: 'Renewal follow-up',
-          statusLabel: 'Ready to call',
-        ),
-        const CustomerContact(
-          name: 'Paul Kato',
-          phoneNumber: '+256 725459480',
-          subtitle: 'Missed callback',
-          statusLabel: 'Ready to call',
-        ),
-        const CustomerContact(
-          name: 'Sarah Namirembe',
-          phoneNumber: '+256 772835195',
-          subtitle: 'New lead',
-          statusLabel: 'Ready to call',
-        ),
-      ] {
+  CustomerCallStore({
+    CallPersistence? callPersistence,
+    DraftPaymentCustomerSource? customerSource,
+    List<CustomerContact> initialCustomers = const [],
+  }) : _callPersistence = callPersistence ?? CallRepository(),
+       _customerSource = customerSource ?? ErpNextCustomerService(),
+       _customers = List<CustomerContact>.from(initialCustomers) {
     initializePlaybackEvents();
   }
 
   final List<CustomerContact> _customers;
   final CallPersistence _callPersistence;
+  final DraftPaymentCustomerSource _customerSource;
+  ErpNextSession? _activeErpNextSession;
   String? _queuedPhoneNumber;
   String? _activePhoneNumber;
   String? _activeRecordingPath;
   bool _isFetchingAllRecordings = false;
+  bool _isLoadingCustomers = false;
   bool _isRecordingPlaying = false;
+  String? _customerLoadError;
 
   void initializePlaybackEvents() {
     ServiceStarter.configurePlaybackEvents(
@@ -54,23 +45,7 @@ class CustomerCallStore extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
 
     for (var i = 0; i < _customers.length; i++) {
-      final customer = _customers[i];
-      final normalizedPhone = _normalize(customer.phoneNumber);
-      if (normalizedPhone == null) {
-        continue;
-      }
-
-      final startedAtMillis = prefs.getInt(_startedAtKey(normalizedPhone));
-      final endedAtMillis = prefs.getInt(_endedAtKey(normalizedPhone));
-
-      _customers[i] = customer.copyWith(
-        lastCallStartedAt: startedAtMillis == null
-            ? customer.lastCallStartedAt
-            : DateTime.fromMillisecondsSinceEpoch(startedAtMillis),
-        lastCallEndedAt: endedAtMillis == null
-            ? customer.lastCallEndedAt
-            : DateTime.fromMillisecondsSinceEpoch(endedAtMillis),
-      );
+      _customers[i] = _withPersistedCallTimestamps(_customers[i], prefs);
     }
 
     notifyListeners();
@@ -78,6 +53,8 @@ class CustomerCallStore extends ChangeNotifier {
 
   List<CustomerContact> get customers => List.unmodifiable(_customers);
   bool get isFetchingAllRecordings => _isFetchingAllRecordings;
+  bool get isLoadingCustomers => _isLoadingCustomers;
+  String? get customerLoadError => _customerLoadError;
 
   int get recordingsReadyCount =>
       _customers.where((customer) => customer.latestRecording != null).length;
@@ -87,6 +64,80 @@ class CustomerCallStore extends ChangeNotifier {
 
   bool isPlayingRecording(CallRecordingFile recording) =>
       isActiveRecording(recording) && _isRecordingPlaying;
+
+  Future<int> loadDraftPaymentCustomers(ErpNextSession session) async {
+    if (_isLoadingCustomers) return _customers.length;
+
+    _activeErpNextSession = session;
+    _isLoadingCustomers = true;
+    _customerLoadError = null;
+    notifyListeners();
+
+    try {
+      final remoteCustomers = await _customerSource.fetchDraftPaymentCustomers(
+        session,
+      );
+      final prefs = await SharedPreferences.getInstance();
+      final refreshedCustomers = <CustomerContact>[];
+
+      for (final remoteCustomer in remoteCustomers) {
+        final previous =
+            _customerForErpNextId(remoteCustomer.customerId) ??
+            _customerForPhone(remoteCustomer.phoneNumber);
+        final draftLabel = remoteCustomer.draftPaymentCount == 1
+            ? '1 draft payment entry'
+            : '${remoteCustomer.draftPaymentCount} draft payment entries';
+        final imageHeaders = _authenticatedImageHeaders(
+          imageUrl: remoteCustomer.imageUrl,
+          session: session,
+        );
+
+        final refreshed = CustomerContact(
+          erpNextCustomerId: remoteCustomer.customerId,
+          name: remoteCustomer.customerName,
+          phoneNumber: remoteCustomer.phoneNumber,
+          profileImageUrl: remoteCustomer.imageUrl,
+          profileImageHeaders: imageHeaders,
+          draftPaymentCount: remoteCustomer.draftPaymentCount,
+          subtitle: draftLabel,
+          statusLabel: previous?.statusLabel ?? 'Ready to call',
+          lastCallStartedAt: previous?.lastCallStartedAt,
+          lastCallEndedAt: previous?.lastCallEndedAt,
+          latestRecording: previous?.latestRecording,
+          availableRecordings: previous?.availableRecordings ?? const [],
+          matchingRecordingsCount: previous?.matchingRecordingsCount ?? 0,
+          isCallQueued: previous?.isCallQueued ?? false,
+          isCallInProgress: previous?.isCallInProgress ?? false,
+        );
+        refreshedCustomers.add(_withPersistedCallTimestamps(refreshed, prefs));
+      }
+
+      _customers
+        ..clear()
+        ..addAll(refreshedCustomers);
+      return _customers.length;
+    } on ErpNextCustomerFetchException catch (error) {
+      _customerLoadError = error.message;
+      return _customers.length;
+    } catch (_) {
+      _customerLoadError =
+          'Could not refresh draft-payment customers from ERPNext.';
+      return _customers.length;
+    } finally {
+      _isLoadingCustomers = false;
+      notifyListeners();
+    }
+  }
+
+  Future<int> refreshDraftPaymentCustomers() async {
+    final session = _activeErpNextSession;
+    if (session == null) {
+      _customerLoadError = 'Log in to ERPNext before refreshing customers.';
+      notifyListeners();
+      return _customers.length;
+    }
+    return loadDraftPaymentCustomers(session);
+  }
 
   Future<bool> dialCustomer(CustomerContact customer) async {
     _queuedPhoneNumber = _normalize(customer.phoneNumber);
@@ -333,6 +384,46 @@ class CustomerCallStore extends ChangeNotifier {
       }
     }
     return null;
+  }
+
+  CustomerContact? _customerForErpNextId(String customerId) {
+    for (final customer in _customers) {
+      if (customer.erpNextCustomerId == customerId) {
+        return customer;
+      }
+    }
+    return null;
+  }
+
+  Map<String, String> _authenticatedImageHeaders({
+    required String? imageUrl,
+    required ErpNextSession session,
+  }) {
+    final uri = imageUrl == null ? null : Uri.tryParse(imageUrl);
+    if (uri == null || uri.host != 'accounting.autozonepro.org') {
+      return const {};
+    }
+    return {'Cookie': 'sid=${session.sessionId}'};
+  }
+
+  CustomerContact _withPersistedCallTimestamps(
+    CustomerContact customer,
+    SharedPreferences prefs,
+  ) {
+    final normalizedPhone = _normalize(customer.phoneNumber);
+    if (normalizedPhone == null) return customer;
+
+    final startedAtMillis = prefs.getInt(_startedAtKey(normalizedPhone));
+    final endedAtMillis = prefs.getInt(_endedAtKey(normalizedPhone));
+
+    return customer.copyWith(
+      lastCallStartedAt: startedAtMillis == null
+          ? customer.lastCallStartedAt
+          : DateTime.fromMillisecondsSinceEpoch(startedAtMillis),
+      lastCallEndedAt: endedAtMillis == null
+          ? customer.lastCallEndedAt
+          : DateTime.fromMillisecondsSinceEpoch(endedAtMillis),
+    );
   }
 
   List<CallRecordingFile> _recordingsMatchingCallWindow(

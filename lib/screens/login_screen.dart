@@ -1,5 +1,4 @@
 import 'package:calls_recording/screens/home_screen.dart';
-import 'package:calls_recording/services/biometric_auth_service.dart';
 import 'package:calls_recording/services/customer_call_store.dart';
 import 'package:calls_recording/services/erpnext_auth_service.dart';
 import 'package:calls_recording/services/secure_session_storage.dart';
@@ -11,14 +10,12 @@ class LoginScreen extends StatefulWidget {
   final CustomerCallStore appState;
   final ErpNextAuthenticator? erpNextAuthenticator;
   final SessionStorage? sessionStorage;
-  final BiometricAuthenticator? biometricAuthenticator;
 
   const LoginScreen({
     super.key,
     required this.appState,
     this.erpNextAuthenticator,
     this.sessionStorage,
-    this.biometricAuthenticator,
   });
 
   @override
@@ -32,23 +29,19 @@ class _LoginScreenState extends State<LoginScreen> {
 
   late final ErpNextAuthenticator _erpNextAuthenticator;
   late final SessionStorage _sessionStorage;
-  late final BiometricAuthenticator _biometricAuthenticator;
 
   bool _rememberMe = true;
   bool _obscurePassword = true;
   bool _isLoggingIn = false;
-  bool _isCheckingFingerprint = false;
   String? _loginError;
 
-  bool get _isBusy => _isLoggingIn || _isCheckingFingerprint;
+  bool get _isBusy => _isLoggingIn;
 
   @override
   void initState() {
     super.initState();
     _erpNextAuthenticator = widget.erpNextAuthenticator ?? ErpNextAuthService();
     _sessionStorage = widget.sessionStorage ?? SecureSessionStorage();
-    _biometricAuthenticator =
-        widget.biometricAuthenticator ?? BiometricAuthService();
   }
 
   @override
@@ -79,6 +72,8 @@ class _LoginScreenState extends State<LoginScreen> {
         await _sessionStorage.clear();
       }
 
+      await widget.appState.loadDraftPaymentCustomers(session);
+
       if (!mounted) return;
       _openHome();
     } on ErpNextAuthException catch (error) {
@@ -96,32 +91,6 @@ class _LoginScreenState extends State<LoginScreen> {
       if (mounted) {
         setState(() {
           _isLoggingIn = false;
-        });
-      }
-    }
-  }
-
-  Future<void> _loginWithFingerprint() async {
-    if (_isBusy) return;
-
-    setState(() {
-      _isCheckingFingerprint = true;
-      _loginError = null;
-    });
-
-    try {
-      final didAuthenticate = await _biometricAuthenticator.authenticate();
-
-      if (!mounted) return;
-      if (didAuthenticate) {
-        _openHome();
-      }
-    } on BiometricAuthException catch (error) {
-      _showMessage(error.message);
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isCheckingFingerprint = false;
         });
       }
     }
@@ -326,34 +295,6 @@ class _LoginScreenState extends State<LoginScreen> {
                                 'Login',
                                 style: TextStyle(fontSize: 17),
                               ),
-                      ),
-                    ),
-                    const SizedBox(height: 14),
-                    SizedBox(
-                      height: 56,
-                      child: OutlinedButton.icon(
-                        key: const Key('fingerprint-login-button'),
-                        onPressed: _isBusy ? null : _loginWithFingerprint,
-                        icon: _isCheckingFingerprint
-                            ? const SizedBox(
-                                width: 24,
-                                height: 24,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2.4,
-                                ),
-                              )
-                            : const Icon(Icons.fingerprint_rounded, size: 29),
-                        label: const Text(
-                          'Login with fingerprint',
-                          style: TextStyle(fontSize: 16),
-                        ),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: AppColors.primary,
-                          side: const BorderSide(color: AppColors.primary),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                        ),
                       ),
                     ),
                     const SizedBox(height: 12),

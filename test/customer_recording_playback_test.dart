@@ -1,4 +1,5 @@
 import 'package:calls_recording/services/customer_call_store.dart';
+import 'package:calls_recording/models/customer_contact.dart';
 import 'package:calls_recording/repository/call_repository.dart';
 import 'package:calls_recording/services/service_starter.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -61,7 +62,17 @@ void main() {
 
     SharedPreferences.setMockInitialValues({});
     final persistence = _FakeCallPersistence();
-    final store = CustomerCallStore(callPersistence: persistence);
+    final store = CustomerCallStore(
+      callPersistence: persistence,
+      initialCustomers: const [
+        CustomerContact(
+          name: 'Othieno Benedict Ernest',
+          phoneNumber: '+256 772545948',
+          subtitle: 'Draft payment entry',
+          statusLabel: 'Ready to call',
+        ),
+      ],
+    );
     store.markCallStarted(
       store.customers.first.phoneNumber,
       startedAt: callStartedAt,

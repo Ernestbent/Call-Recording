@@ -8,7 +8,7 @@ import android.media.MediaPlayer
 import android.net.Uri
 import android.provider.MediaStore
 import android.util.Log
-import io.flutter.embedding.android.FlutterFragmentActivity
+import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
@@ -19,7 +19,7 @@ import java.util.TimeZone
 import java.util.concurrent.Executors
 import kotlin.math.abs
 
-class MainActivity : FlutterFragmentActivity() {
+class MainActivity : FlutterActivity() {
 
     private val CHANNEL = "call_recorder_service"
     private val TAG = "CALL_RECORD_LOOKUP"

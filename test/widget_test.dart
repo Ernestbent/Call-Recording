@@ -1,20 +1,35 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:calls_recording/main.dart';
 import 'package:calls_recording/models/erpnext_session.dart';
+import 'package:calls_recording/models/draft_payment_customer.dart';
 import 'package:calls_recording/screens/login_screen.dart';
-import 'package:calls_recording/services/biometric_auth_service.dart';
+import 'package:calls_recording/screens/splash_screen.dart';
 import 'package:calls_recording/services/customer_call_store.dart';
 import 'package:calls_recording/services/erpnext_auth_service.dart';
+import 'package:calls_recording/services/erpnext_customer_service.dart';
 import 'package:calls_recording/services/secure_session_storage.dart';
 import 'package:calls_recording/theme/app_theme.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
-  testWidgets('splash opens login before the home screen', (
+  setUp(() {
+    SharedPreferences.setMockInitialValues({});
+  });
+
+  testWidgets('splash opens login when there is no saved session', (
     WidgetTester tester,
   ) async {
-    await tester.pumpWidget(MyApp(appState: CustomerCallStore()));
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.light,
+        home: SplashScreen(
+          appState: _testCustomerCallStore(),
+          erpNextAuthenticator: _SuccessfulErpNextAuthenticator(),
+          sessionStorage: _MemorySessionStorage(),
+        ),
+      ),
+    );
 
     expect(find.byType(Image), findsOneWidget);
     expect(find.text('Call Recorder'), findsNothing);
@@ -25,7 +40,53 @@ void main() {
 
     expect(find.text('Welcome Back'), findsOneWidget);
     expect(find.text('RECORDINGS READY'), findsNothing);
-    expect(find.byKey(const Key('fingerprint-login-button')), findsOneWidget);
+    expect(find.byIcon(Icons.fingerprint_rounded), findsNothing);
+  });
+
+  testWidgets('splash bypasses login for a valid saved ERPNext session', (
+    WidgetTester tester,
+  ) async {
+    final sessionStorage = _MemorySessionStorage()..session = _testSession();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.light,
+        home: SplashScreen(
+          appState: _testCustomerCallStore(),
+          erpNextAuthenticator: _SuccessfulErpNextAuthenticator(),
+          sessionStorage: sessionStorage,
+        ),
+      ),
+    );
+
+    await tester.pump(const Duration(milliseconds: 3300));
+    await tester.pumpAndSettle();
+
+    expect(find.text('RECORDINGS READY'), findsOneWidget);
+    expect(find.text('Welcome Back'), findsNothing);
+  });
+
+  testWidgets('splash clears an expired ERPNext session and opens login', (
+    WidgetTester tester,
+  ) async {
+    final sessionStorage = _MemorySessionStorage()..session = _testSession();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.light,
+        home: SplashScreen(
+          appState: _testCustomerCallStore(),
+          erpNextAuthenticator: _ExpiredErpNextAuthenticator(),
+          sessionStorage: sessionStorage,
+        ),
+      ),
+    );
+
+    await tester.pump(const Duration(milliseconds: 3300));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Welcome Back'), findsOneWidget);
+    expect(sessionStorage.session, isNull);
   });
 
   testWidgets('ERPNext login saves its session and opens home', (
@@ -37,10 +98,9 @@ void main() {
       MaterialApp(
         theme: AppTheme.light,
         home: LoginScreen(
-          appState: CustomerCallStore(),
+          appState: _testCustomerCallStore(),
           erpNextAuthenticator: _SuccessfulErpNextAuthenticator(),
           sessionStorage: sessionStorage,
-          biometricAuthenticator: _SuccessfulBiometricAuthenticator(),
         ),
       ),
     );
@@ -59,36 +119,6 @@ void main() {
 
     expect(find.text('RECORDINGS READY'), findsOneWidget);
     expect(sessionStorage.session?.userId, 'agent@example.com');
-  });
-
-  testWidgets('fingerprint remains independent from ERPNext login', (
-    WidgetTester tester,
-  ) async {
-    final erpNextAuthenticator = _SuccessfulErpNextAuthenticator();
-    final sessionStorage = _MemorySessionStorage();
-
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: AppTheme.light,
-        home: LoginScreen(
-          appState: CustomerCallStore(),
-          erpNextAuthenticator: erpNextAuthenticator,
-          sessionStorage: sessionStorage,
-          biometricAuthenticator: _SuccessfulBiometricAuthenticator(),
-        ),
-      ),
-    );
-
-    await tester.ensureVisible(
-      find.byKey(const Key('fingerprint-login-button')),
-    );
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('fingerprint-login-button')));
-    await tester.pumpAndSettle();
-
-    expect(find.text('RECORDINGS READY'), findsOneWidget);
-    expect(erpNextAuthenticator.loginCalls, 0);
-    expect(sessionStorage.session, isNull);
   });
 }
 
@@ -116,6 +146,11 @@ class _SuccessfulErpNextAuthenticator implements ErpNextAuthenticator {
   Future<void> logout(ErpNextSession session) async {}
 }
 
+class _ExpiredErpNextAuthenticator extends _SuccessfulErpNextAuthenticator {
+  @override
+  Future<bool> isSessionValid(ErpNextSession session) async => false;
+}
+
 class _MemorySessionStorage implements SessionStorage {
   ErpNextSession? session;
 
@@ -133,7 +168,24 @@ class _MemorySessionStorage implements SessionStorage {
   }
 }
 
-class _SuccessfulBiometricAuthenticator implements BiometricAuthenticator {
+class _EmptyDraftPaymentCustomerSource implements DraftPaymentCustomerSource {
   @override
-  Future<bool> authenticate() async => true;
+  Future<List<DraftPaymentCustomer>> fetchDraftPaymentCustomers(
+    ErpNextSession session,
+  ) async {
+    return const [];
+  }
+}
+
+CustomerCallStore _testCustomerCallStore() {
+  return CustomerCallStore(customerSource: _EmptyDraftPaymentCustomerSource());
+}
+
+ErpNextSession _testSession() {
+  return ErpNextSession(
+    sessionId: 'saved-test-session',
+    userId: 'agent@example.com',
+    fullName: 'Test Agent',
+    createdAt: DateTime.utc(2026, 7, 24),
+  );
 }
