@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:calls_recording/models/erpnext_session.dart';
 import 'package:calls_recording/models/draft_payment_customer.dart';
+import 'package:calls_recording/screens/customers_screen.dart';
 import 'package:calls_recording/screens/login_screen.dart';
 import 'package:calls_recording/screens/splash_screen.dart';
 import 'package:calls_recording/services/customer_call_store.dart';
@@ -119,6 +120,36 @@ void main() {
 
     expect(find.text('RECORDINGS READY'), findsOneWidget);
     expect(sessionStorage.session?.userId, 'agent@example.com');
+  });
+
+  testWidgets('Customers screen scrolls without overflow in landscape', (
+    WidgetTester tester,
+  ) async {
+    tester.view.physicalSize = const Size(800, 360);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.light,
+        home: CustomersScreen(appState: _testCustomerCallStore()),
+      ),
+    );
+
+    expect(find.byType(CustomScrollView), findsOneWidget);
+    expect(tester.takeException(), isNull);
+
+    await tester.drag(find.byType(CustomScrollView), const Offset(0, -220));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text(
+        'No customers with draft Payment Entries and a mobile number were found.',
+      ),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
   });
 }
 

@@ -57,135 +57,156 @@ class CustomersScreen extends StatelessWidget {
         child: AnimatedBuilder(
           animation: appState,
           builder: (context, _) {
+            final customers = appState.customers;
+
             return Padding(
               padding: const EdgeInsets.fromLTRB(20, 22, 20, 0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  if (appState.isLoadingCustomers) ...[
-                    const LinearProgressIndicator(),
-                    const SizedBox(height: 14),
-                  ],
-                  if (appState.customerLoadError != null) ...[
-                    _CustomerLoadError(message: appState.customerLoadError!),
-                    const SizedBox(height: 14),
-                  ],
-                  _SummaryCard(
-                    recordingsReadyCount: appState.recordingsReadyCount,
+              child: CustomScrollView(
+                slivers: [
+                  if (appState.isLoadingCustomers)
+                    const SliverToBoxAdapter(
+                      child: Column(
+                        children: [
+                          LinearProgressIndicator(),
+                          SizedBox(height: 14),
+                        ],
+                      ),
+                    ),
+                  if (appState.customerLoadError != null)
+                    SliverToBoxAdapter(
+                      child: Column(
+                        children: [
+                          _CustomerLoadError(
+                            message: appState.customerLoadError!,
+                          ),
+                          const SizedBox(height: 14),
+                        ],
+                      ),
+                    ),
+                  SliverToBoxAdapter(
+                    child: _SummaryCard(
+                      recordingsReadyCount: appState.recordingsReadyCount,
+                    ),
                   ),
-                  const SizedBox(height: 14),
-                  SizedBox(
-                    width: double.infinity,
-                    child: FilledButton.icon(
-                      onPressed: appState.isFetchingAllRecordings
-                          ? null
-                          : () async {
-                              final matches = await appState
-                                  .fetchRecordingsForAllCustomers();
+                  const SliverToBoxAdapter(child: SizedBox(height: 14)),
+                  SliverToBoxAdapter(
+                    child: SizedBox(
+                      width: double.infinity,
+                      child: FilledButton.icon(
+                        onPressed: appState.isFetchingAllRecordings
+                            ? null
+                            : () async {
+                                final matches = await appState
+                                    .fetchRecordingsForAllCustomers();
 
-                              if (!context.mounted) return;
+                                if (!context.mounted) return;
 
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Text(
-                                    matches == 0
-                                        ? 'No recordings matched calls made from this app.'
-                                        : 'Matched recordings for $matches customer${matches == 1 ? '' : 's'}.',
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text(
+                                      matches == 0
+                                          ? 'No recordings matched calls made from this app.'
+                                          : 'Matched recordings for $matches customer${matches == 1 ? '' : 's'}.',
+                                    ),
                                   ),
-                                ),
-                              );
-                            },
-                      style: FilledButton.styleFrom(
-                        backgroundColor: AppColors.primary,
-                        foregroundColor: Colors.white,
-                        disabledBackgroundColor: AppColors.border,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
+                                );
+                              },
+                        style: FilledButton.styleFrom(
+                          backgroundColor: AppColors.primary,
+                          foregroundColor: Colors.white,
+                          disabledBackgroundColor: AppColors.border,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          padding: const EdgeInsets.symmetric(vertical: 15),
                         ),
-                        padding: const EdgeInsets.symmetric(vertical: 15),
+                        icon: Icon(
+                          appState.isFetchingAllRecordings
+                              ? Icons.sync_rounded
+                              : Icons.library_music_rounded,
+                          size: 18,
+                        ),
+                        label: Text(
+                          appState.isFetchingAllRecordings
+                              ? 'Fetching recordings...'
+                              : 'Fetch All Recordings',
+                          style: const TextStyle(
+                            fontFamily: 'Bubblegum Sans',
+                            fontWeight: FontWeight.w400,
+                          ),
+                        ),
                       ),
-                      icon: Icon(
-                        appState.isFetchingAllRecordings
-                            ? Icons.sync_rounded
-                            : Icons.library_music_rounded,
-                        size: 18,
-                      ),
-                      label: Text(
-                        appState.isFetchingAllRecordings
-                            ? 'Fetching recordings...'
-                            : 'Fetch All Recordings',
+                    ),
+                  ),
+                  const SliverToBoxAdapter(child: SizedBox(height: 26)),
+                  SliverToBoxAdapter(
+                    child: SectionLabel(
+                      'Customer calls',
+                      trailing: Text(
+                        '${customers.length} contacts',
                         style: const TextStyle(
-                          fontFamily: 'Bubblegum Sans',
+                          color: AppColors.subtle,
+                          fontSize: 12,
                           fontWeight: FontWeight.w400,
                         ),
                       ),
                     ),
                   ),
-                  const SizedBox(height: 26),
-                  SectionLabel(
-                    'Customer calls',
-                    trailing: Text(
-                      '${appState.customers.length} contacts',
-                      style: const TextStyle(
-                        color: AppColors.subtle,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w400,
-                      ),
+                  const SliverToBoxAdapter(child: SizedBox(height: 12)),
+                  if (customers.isEmpty)
+                    const SliverToBoxAdapter(child: _EmptyCustomersState())
+                  else
+                    SliverList(
+                      delegate: SliverChildBuilderDelegate((context, index) {
+                        if (index.isOdd) {
+                          return const SizedBox(height: 12);
+                        }
+
+                        final customer = customers[index ~/ 2];
+                        return _CustomerCard(
+                          customer: customer,
+                          onCallTap: () async {
+                            final didOpen = await appState.dialCustomer(
+                              customer,
+                            );
+
+                            if (!context.mounted || didOpen) return;
+
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text(
+                                  'Unable to open dialer right now.',
+                                ),
+                              ),
+                            );
+                          },
+                          onPlayTap: (recording) async {
+                            final wasPlaying = appState.isPlayingRecording(
+                              recording,
+                            );
+                            final didStart = await appState.playRecording(
+                              recording,
+                            );
+                            if (!context.mounted) return;
+
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                  didStart
+                                      ? wasPlaying
+                                            ? 'Playback paused'
+                                            : 'Playing ${recording.fileName}'
+                                      : 'Unable to play this recording.',
+                                ),
+                              ),
+                            );
+                          },
+                          isActiveRecording: appState.isActiveRecording,
+                          isPlayingRecording: appState.isPlayingRecording,
+                        );
+                      }, childCount: (customers.length * 2) - 1),
                     ),
-                  ),
-                  const SizedBox(height: 12),
-                  Expanded(
-                    child: appState.customers.isEmpty
-                        ? const _EmptyCustomersState()
-                        : ListView.separated(
-                            itemCount: appState.customers.length,
-                            separatorBuilder: (_, _) =>
-                                const SizedBox(height: 12),
-                            itemBuilder: (context, index) {
-                              final customer = appState.customers[index];
-                              return _CustomerCard(
-                                customer: customer,
-                                onCallTap: () async {
-                                  final didOpen = await appState.dialCustomer(
-                                    customer,
-                                  );
-
-                                  if (!context.mounted || didOpen) return;
-
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(
-                                      content: Text(
-                                        'Unable to open dialer right now.',
-                                      ),
-                                    ),
-                                  );
-                                },
-                                onPlayTap: (recording) async {
-                                  final wasPlaying = appState
-                                      .isPlayingRecording(recording);
-                                  final didStart = await appState.playRecording(
-                                    recording,
-                                  );
-                                  if (!context.mounted) return;
-
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(
-                                      content: Text(
-                                        didStart
-                                            ? wasPlaying
-                                                  ? 'Playback paused'
-                                                  : 'Playing ${recording.fileName}'
-                                            : 'Unable to play this recording.',
-                                      ),
-                                    ),
-                                  );
-                                },
-                                isActiveRecording: appState.isActiveRecording,
-                                isPlayingRecording: appState.isPlayingRecording,
-                              );
-                            },
-                          ),
-                  ),
+                  const SliverToBoxAdapter(child: SizedBox(height: 20)),
                 ],
               ),
             );
