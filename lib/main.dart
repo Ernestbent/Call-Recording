@@ -1,10 +1,10 @@
 import 'package:calls_recording/controllers/call_controller.dart';
 import 'package:flutter/material.dart';
-import 'package:calls_recording/screens/splash_screen.dart';
 import 'package:calls_recording/services/call_manager.dart';
 import 'package:calls_recording/services/customer_call_store.dart';
 import 'package:calls_recording/services/session_manager.dart';
 import 'package:calls_recording/theme/app_theme.dart';
+import 'package:calls_recording/widgets/app_lock_gate.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -33,7 +33,7 @@ class MyApp extends StatelessWidget {
       title: 'Call Recorder',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.light,
-      home: SplashScreen(appState: appState),
+      home: AppLockGate(appState: appState),
     );
   }
 }

@@ -1,18 +1,23 @@
 import 'package:flutter/material.dart';
+import 'package:local_auth/local_auth.dart';
 import 'package:calls_recording/services/customer_call_store.dart';
+import 'package:calls_recording/services/app_lock_service.dart';
 import 'package:calls_recording/services/recording_upload_service.dart';
 import 'package:calls_recording/screens/home_screen.dart';
+import 'package:calls_recording/screens/pattern_setup_screen.dart';
 import 'package:calls_recording/widgets/custom_bottom_nav.dart';
 import 'package:calls_recording/theme/app_theme.dart';
 
 class SettingsScreen extends StatefulWidget {
   final CustomerCallStore appState;
   final RecordingUploadSettings? uploadSettings;
+  final AppLockService? appLockService;
 
   const SettingsScreen({
     super.key,
     required this.appState,
     this.uploadSettings,
+    this.appLockService,
   });
 
   @override
@@ -24,15 +29,149 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _darkMode = false;
   bool _isLoadingApiUrl = true;
   bool _isSavingApiUrl = false;
+  bool _isLoadingSecurity = true;
+  bool _isUpdatingSecurity = false;
+  bool _hasEnrolledBiometrics = false;
+  String _biometricName = 'Biometric unlock';
+  AppLockConfiguration _lockConfiguration = AppLockConfiguration.disabled;
 
   final TextEditingController _apiUrlController = TextEditingController();
   late final RecordingUploadSettings _uploadSettings;
+  late final AppLockService _appLockService;
 
   @override
   void initState() {
     super.initState();
     _uploadSettings = widget.uploadSettings ?? RecordingUploadSettings();
+    _appLockService = widget.appLockService ?? AppLockService();
     _loadApiUrl();
+    _loadSecurity();
+  }
+
+  Future<void> _loadSecurity() async {
+    final results = await Future.wait([
+      _appLockService.readConfiguration(),
+      _appLockService.availableBiometrics(),
+    ]);
+    if (!mounted) return;
+
+    final configuration = results[0] as AppLockConfiguration;
+    final biometrics = results[1] as List<BiometricType>;
+    setState(() {
+      _lockConfiguration = configuration;
+      _hasEnrolledBiometrics = biometrics.isNotEmpty;
+      _biometricName = biometrics.contains(BiometricType.fingerprint)
+          ? 'Fingerprint unlock'
+          : biometrics.contains(BiometricType.face)
+          ? 'Face unlock'
+          : 'Biometric unlock';
+      _isLoadingSecurity = false;
+    });
+  }
+
+  Future<void> _setAppLockEnabled(bool enabled) async {
+    if (_isUpdatingSecurity) return;
+
+    if (enabled) {
+      final saved = await Navigator.of(context).push<bool>(
+        MaterialPageRoute(
+          builder: (_) => PatternSetupScreen(appLockService: _appLockService),
+        ),
+      );
+      if (saved == true) {
+        await _loadSecurity();
+        _showApiMessage('App lock enabled.');
+      }
+      return;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Turn off app lock?'),
+        content: const Text(
+          'Your saved app pattern will be removed. You can create a new one '
+          'later.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Turn off'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    setState(() {
+      _isUpdatingSecurity = true;
+    });
+    try {
+      await _appLockService.disable();
+      await _loadSecurity();
+      _showApiMessage('App lock turned off.');
+    } catch (_) {
+      _showApiMessage('Could not update app lock.', isError: true);
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isUpdatingSecurity = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _setBiometricsEnabled(bool enabled) async {
+    if (_isUpdatingSecurity) return;
+
+    setState(() {
+      _isUpdatingSecurity = true;
+    });
+    try {
+      if (enabled) {
+        final authenticated = await _appLockService
+            .authenticateWithBiometrics();
+        if (!authenticated) {
+          _showApiMessage(
+            'Biometric verification was not completed.',
+            isError: true,
+          );
+          return;
+        }
+      }
+      await _appLockService.setBiometricsEnabled(enabled);
+      await _loadSecurity();
+      _showApiMessage(
+        enabled ? 'Biometric unlock enabled.' : 'Biometric unlock disabled.',
+      );
+    } catch (_) {
+      _showApiMessage('Could not update biometric unlock.', isError: true);
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isUpdatingSecurity = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _changePattern() async {
+    final changed = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => PatternSetupScreen(
+          appLockService: _appLockService,
+          isChangingPattern: true,
+        ),
+      ),
+    );
+    if (changed == true) {
+      await _loadSecurity();
+      _showApiMessage('App pattern changed.');
+    }
   }
 
   Future<void> _loadApiUrl() async {
@@ -154,6 +293,56 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                     const SizedBox(height: 24),
 
+                    _buildSectionHeader('App Security'),
+                    _buildSwitchTile(
+                      icon: Icons.lock_outline_rounded,
+                      title: 'App Lock',
+                      subtitle: 'Require unlock before the splash screen',
+                      value: _lockConfiguration.enabled,
+                      onChanged: _isLoadingSecurity || _isUpdatingSecurity
+                          ? null
+                          : _setAppLockEnabled,
+                    ),
+                    const SizedBox(height: 10),
+                    _buildSwitchTile(
+                      icon: Icons.fingerprint_rounded,
+                      title: _biometricName,
+                      subtitle: _hasEnrolledBiometrics
+                          ? 'Uses biometrics enrolled in this phone'
+                          : 'No enrolled phone biometrics found',
+                      value: _lockConfiguration.biometricsEnabled,
+                      onChanged:
+                          _isLoadingSecurity ||
+                              _isUpdatingSecurity ||
+                              !_lockConfiguration.enabled ||
+                              !_hasEnrolledBiometrics
+                          ? null
+                          : _setBiometricsEnabled,
+                    ),
+                    if (_lockConfiguration.enabled) ...[
+                      const SizedBox(height: 10),
+                      _buildActionTile(
+                        icon: Icons.pattern_rounded,
+                        title: 'Change app pattern',
+                        subtitle: 'Create a new 3×3 unlock pattern',
+                        onTap: _isUpdatingSecurity ? null : _changePattern,
+                      ),
+                    ],
+                    const Padding(
+                      padding: EdgeInsets.fromLTRB(4, 10, 4, 0),
+                      child: Text(
+                        'Biometric access accepts any fingerprint or face '
+                        'already enrolled by the phone. Use the app pattern '
+                        'for another authorised user.',
+                        style: TextStyle(
+                          fontSize: 12,
+                          height: 1.35,
+                          color: AppColors.muted,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+
                     _buildSectionHeader('Appearance'),
                     _buildSwitchTile(
                       icon: Icons.dark_mode_outlined,
@@ -239,7 +428,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     required String title,
     required String subtitle,
     required bool value,
-    required Function(bool) onChanged,
+    required ValueChanged<bool>? onChanged,
   }) {
     return Container(
       margin: const EdgeInsets.only(bottom: 4),
@@ -290,6 +479,66 @@ class _SettingsScreenState extends State<SettingsScreen> {
             inactiveTrackColor: AppColors.border,
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildActionTile({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required VoidCallback? onTap,
+  }) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: AppSurfaces.card(
+            color: AppColors.surfaceMuted,
+            radius: 14,
+            elevated: false,
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: AppColors.primarySoft,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(icon, color: AppColors.primary, size: 21),
+              ),
+              const SizedBox(width: 13),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: const TextStyle(
+                        fontSize: 14,
+                        color: AppColors.ink,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: AppColors.muted,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Icon(Icons.chevron_right_rounded, color: AppColors.subtle),
+            ],
+          ),
+        ),
       ),
     );
   }
