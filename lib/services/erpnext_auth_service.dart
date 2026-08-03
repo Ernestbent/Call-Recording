@@ -25,23 +25,21 @@ class ErpNextAuthException implements Exception {
 }
 
 class ErpNextAuthService implements ErpNextAuthenticator {
-  static final Uri _loginUrl = Uri.https(
-    'accounting.autozonepro.org',
-    '/api/method/login',
+  static const String defaultBaseUrl = 'https://accounting.autozonepro.org';
+  static const String _configuredBaseUrl = String.fromEnvironment(
+    'ERPNEXT_BASE_URL',
+    defaultValue: defaultBaseUrl,
   );
-  static final Uri _loggedUserUrl = Uri.https(
-    'accounting.autozonepro.org',
-    '/api/method/frappe.auth.get_logged_user',
-  );
-  static final Uri _logoutUrl = Uri.https(
-    'accounting.autozonepro.org',
-    '/api/method/logout',
-  );
-  static const Duration _requestTimeout = Duration(seconds: 20);
+  static const Duration _requestTimeout = Duration(seconds: 30);
 
   final http.Client _client;
+  final Uri _baseUri;
 
-  ErpNextAuthService({http.Client? client}) : _client = client ?? http.Client();
+  ErpNextAuthService({http.Client? client, Uri? baseUri})
+    : _client = client ?? http.Client(),
+      _baseUri = baseUri ?? Uri.parse(_configuredBaseUrl);
+
+  Uri _url(String path) => _baseUri.resolve(path);
 
   @override
   Future<ErpNextSession> login({
@@ -51,7 +49,7 @@ class ErpNextAuthService implements ErpNextAuthenticator {
     try {
       final response = await _client
           .post(
-            _loginUrl,
+            _url('/api/method/login'),
             headers: const {
               'Accept': 'application/json',
               'Content-Type': 'application/json',
@@ -106,7 +104,7 @@ class ErpNextAuthService implements ErpNextAuthenticator {
     try {
       final response = await _client
           .get(
-            _loggedUserUrl,
+            _url('/api/method/frappe.auth.get_logged_user'),
             headers: {
               'Accept': 'application/json',
               'Cookie': 'sid=${session.sessionId}',
@@ -126,7 +124,10 @@ class ErpNextAuthService implements ErpNextAuthenticator {
   Future<void> logout(ErpNextSession session) async {
     try {
       await _client
-          .get(_logoutUrl, headers: {'Cookie': 'sid=${session.sessionId}'})
+          .get(
+            _url('/api/method/logout'),
+            headers: {'Cookie': 'sid=${session.sessionId}'},
+          )
           .timeout(_requestTimeout);
     } catch (_) {
       // Local session removal must still succeed if ERPNext is unreachable.

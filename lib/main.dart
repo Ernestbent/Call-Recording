@@ -3,8 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:calls_recording/services/call_manager.dart';
 import 'package:calls_recording/services/customer_call_store.dart';
 import 'package:calls_recording/services/session_manager.dart';
+import 'package:calls_recording/screens/splash_screen.dart';
 import 'package:calls_recording/theme/app_theme.dart';
-import 'package:calls_recording/widgets/app_lock_gate.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -29,11 +29,16 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Call Recorder',
-      debugShowCheckedModeBanner: false,
-      theme: AppTheme.light,
-      home: AppLockGate(appState: appState),
+    return AnimatedBuilder(
+      animation: appState,
+      builder: (context, _) => MaterialApp(
+        title: 'Call Recorder',
+        debugShowCheckedModeBanner: false,
+        theme: AppTheme.light,
+        darkTheme: AppTheme.dark,
+        themeMode: appState.isDarkMode ? ThemeMode.dark : ThemeMode.light,
+        home: SplashScreen(appState: appState),
+      ),
     );
   }
 }

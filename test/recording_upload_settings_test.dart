@@ -9,7 +9,10 @@ void main() {
     SharedPreferences.setMockInitialValues({});
     final settings = RecordingUploadSettings();
 
-    expect(await settings.readEndpoint(), isNull);
+    expect(
+      await settings.readEndpoint(),
+      Uri.parse('https://erp.autozonepro.org/api/mobile/call-logs/'),
+    );
 
     await settings.saveEndpoint(
       'https://example.ngrok-free.dev/api/recordings',

@@ -1,4 +1,8 @@
+import 'dart:async';
+
+import 'package:calls_recording/models/erpnext_session.dart';
 import 'package:calls_recording/screens/home_screen.dart';
+import 'package:calls_recording/services/agent_credential_service.dart';
 import 'package:calls_recording/services/customer_call_store.dart';
 import 'package:calls_recording/services/erpnext_auth_service.dart';
 import 'package:calls_recording/services/secure_session_storage.dart';
@@ -10,12 +14,14 @@ class LoginScreen extends StatefulWidget {
   final CustomerCallStore appState;
   final ErpNextAuthenticator? erpNextAuthenticator;
   final SessionStorage? sessionStorage;
+  final AgentCredentialManager? credentialManager;
 
   const LoginScreen({
     super.key,
     required this.appState,
     this.erpNextAuthenticator,
     this.sessionStorage,
+    this.credentialManager,
   });
 
   @override
@@ -29,6 +35,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
   late final ErpNextAuthenticator _erpNextAuthenticator;
   late final SessionStorage _sessionStorage;
+  late final AgentCredentialManager _credentialManager;
 
   bool _rememberMe = true;
   bool _obscurePassword = true;
@@ -42,6 +49,8 @@ class _LoginScreenState extends State<LoginScreen> {
     super.initState();
     _erpNextAuthenticator = widget.erpNextAuthenticator ?? ErpNextAuthService();
     _sessionStorage = widget.sessionStorage ?? SecureSessionStorage();
+    _credentialManager =
+        widget.credentialManager ?? SecureAgentCredentialManager();
   }
 
   @override
@@ -60,40 +69,72 @@ class _LoginScreenState extends State<LoginScreen> {
       _loginError = null;
     });
 
+    late final ErpNextSession session;
     try {
-      final session = await _erpNextAuthenticator.login(
+      session = await _erpNextAuthenticator.login(
         username: _emailController.text,
         password: _passwordController.text,
       );
+    } on ErpNextAuthException catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _isLoggingIn = false;
+        _loginError = error.message;
+      });
+      return;
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _isLoggingIn = false;
+        _loginError = 'Could not complete the ERPNext login.';
+      });
+      return;
+    }
 
+    try {
+      await _credentialManager.activateForEmail(session.userId);
+    } on AgentCredentialException catch (error) {
+      await _erpNextAuthenticator.logout(session);
+      if (!mounted) return;
+      setState(() {
+        _isLoggingIn = false;
+        _loginError = error.message;
+      });
+      return;
+    } catch (_) {
+      await _erpNextAuthenticator.logout(session);
+      if (!mounted) return;
+      setState(() {
+        _isLoggingIn = false;
+        _loginError =
+            'Could not securely prepare upload credentials for this account.';
+      });
+      return;
+    }
+
+    var sessionWasSaved = true;
+    try {
       if (_rememberMe) {
         await _sessionStorage.save(session);
       } else {
         await _sessionStorage.clear();
       }
-
-      await widget.appState.loadDraftPaymentCustomers(session);
-
-      if (!mounted) return;
-      _openHome();
-    } on ErpNextAuthException catch (error) {
-      if (!mounted) return;
-      setState(() {
-        _loginError = error.message;
-      });
     } catch (_) {
-      if (!mounted) return;
-      setState(() {
-        _loginError =
-            'Login succeeded, but the session could not be saved securely.';
-      });
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isLoggingIn = false;
-        });
-      }
+      sessionWasSaved = false;
     }
+
+    if (!mounted) return;
+    setState(() {
+      _isLoggingIn = false;
+    });
+    if (!sessionWasSaved) {
+      _showMessage(
+        'Signed in successfully, but this session could not be remembered.',
+      );
+    }
+
+    _openHome();
+    unawaited(widget.appState.loadDraftPaymentCustomers(session));
   }
 
   void _showMessage(String message) {

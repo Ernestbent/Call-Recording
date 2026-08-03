@@ -1,6 +1,8 @@
 import 'dart:io';
 
 import 'package:calls_recording/db/call_model.dart';
+import 'package:calls_recording/models/api_credentials.dart';
+import 'package:calls_recording/services/agent_credential_service.dart';
 import 'package:calls_recording/services/recording_upload_service.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -20,12 +22,14 @@ void main() {
       late http.Request capturedRequest;
       final uploader = HttpRecordingUploader(
         endpoint: Uri.parse('https://example.test/api/recordings'),
-        bearerToken: 'test-token',
+        credentialProvider: _TestCredentialProvider(),
         client: MockClient((request) async {
           capturedRequest = request;
           return http.Response(
-            '{"success":true,"upload_id":"upload-123",'
-            '"message":"Recording uploaded"}',
+            '{"ok":true,"duplicate":false,'
+            '"message":"Call log synced.",'
+            '"call_log":{"id":123,'
+            '"audio_url":"/mobile-call-logs/123/audio/"}}',
             201,
             headers: {'content-type': 'application/json'},
           );
@@ -43,25 +47,44 @@ void main() {
 
       final result = await uploader.upload(call: call, customerId: 'CUST-001');
 
-      expect(result.uploadId, 'upload-123');
+      expect(result.uploadId, '123');
       expect(capturedRequest.method, 'POST');
       expect(
         capturedRequest.url,
         Uri.parse('https://example.test/api/recordings'),
       );
-      expect(capturedRequest.headers['authorization'], 'Bearer test-token');
+      expect(
+        capturedRequest.headers['authorization'],
+        'token test-api-key:test-api-secret',
+      );
       expect(
         capturedRequest.headers['content-type'],
         startsWith('multipart/form-data; boundary='),
       );
-      expect(capturedRequest.body, contains('name="recording"'));
+      expect(capturedRequest.body, contains('name="audio_file"'));
       expect(capturedRequest.body, contains('filename="sample.mp3"'));
-      expect(capturedRequest.body, contains('name="session_id"'));
+      expect(capturedRequest.body, contains('name="device_local_id"'));
       expect(capturedRequest.body, contains('call-123'));
-      expect(capturedRequest.body, contains('name="phone_number"'));
+      expect(capturedRequest.body, contains('name="mobile_no"'));
       expect(capturedRequest.body, contains('0755962582'));
       expect(capturedRequest.body, contains('name="customer_id"'));
       expect(capturedRequest.body, contains('CUST-001'));
+      expect(capturedRequest.body, contains('name="call_date"'));
+      expect(capturedRequest.body, contains('2026-07-24'));
+      expect(capturedRequest.body, contains('name="call_time"'));
+      expect(capturedRequest.body, contains('13:00:20'));
+      expect(capturedRequest.body, contains('name="duration_seconds"'));
     },
   );
+}
+
+class _TestCredentialProvider implements ApiCredentialProvider {
+  @override
+  Future<ApiCredentials?> read() async {
+    return const ApiCredentials(
+      email: 'agent@example.com',
+      apiKey: 'test-api-key',
+      apiSecret: 'test-api-secret',
+    );
+  }
 }

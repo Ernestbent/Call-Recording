@@ -1,23 +1,29 @@
 import 'package:flutter/material.dart';
-import 'package:local_auth/local_auth.dart';
+import 'package:calls_recording/models/erpnext_session.dart';
+import 'package:calls_recording/services/agent_credential_service.dart';
 import 'package:calls_recording/services/customer_call_store.dart';
-import 'package:calls_recording/services/app_lock_service.dart';
+import 'package:calls_recording/services/erpnext_auth_service.dart';
 import 'package:calls_recording/services/recording_upload_service.dart';
+import 'package:calls_recording/services/secure_session_storage.dart';
 import 'package:calls_recording/screens/home_screen.dart';
-import 'package:calls_recording/screens/pattern_setup_screen.dart';
+import 'package:calls_recording/screens/login_screen.dart';
 import 'package:calls_recording/widgets/custom_bottom_nav.dart';
 import 'package:calls_recording/theme/app_theme.dart';
 
 class SettingsScreen extends StatefulWidget {
   final CustomerCallStore appState;
   final RecordingUploadSettings? uploadSettings;
-  final AppLockService? appLockService;
+  final ErpNextAuthenticator? erpNextAuthenticator;
+  final SessionStorage? sessionStorage;
+  final AgentCredentialManager? credentialManager;
 
   const SettingsScreen({
     super.key,
     required this.appState,
     this.uploadSettings,
-    this.appLockService,
+    this.erpNextAuthenticator,
+    this.sessionStorage,
+    this.credentialManager,
   });
 
   @override
@@ -26,152 +32,213 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   bool _autoRecordCalls = true;
-  bool _darkMode = false;
   bool _isLoadingApiUrl = true;
   bool _isSavingApiUrl = false;
-  bool _isLoadingSecurity = true;
-  bool _isUpdatingSecurity = false;
-  bool _hasEnrolledBiometrics = false;
-  String _biometricName = 'Biometric unlock';
-  AppLockConfiguration _lockConfiguration = AppLockConfiguration.disabled;
+  bool _isLoadingProfile = true;
+  bool _isLoggingOut = false;
+  ErpNextSession? _session;
 
   final TextEditingController _apiUrlController = TextEditingController();
   late final RecordingUploadSettings _uploadSettings;
-  late final AppLockService _appLockService;
+  late final ErpNextAuthenticator _erpNextAuthenticator;
+  late final SessionStorage _sessionStorage;
+  late final AgentCredentialManager _credentialManager;
 
   @override
   void initState() {
     super.initState();
     _uploadSettings = widget.uploadSettings ?? RecordingUploadSettings();
-    _appLockService = widget.appLockService ?? AppLockService();
+    _erpNextAuthenticator = widget.erpNextAuthenticator ?? ErpNextAuthService();
+    _sessionStorage = widget.sessionStorage ?? SecureSessionStorage();
+    _credentialManager =
+        widget.credentialManager ?? SecureAgentCredentialManager();
     _loadApiUrl();
-    _loadSecurity();
+    _loadProfile();
   }
 
-  Future<void> _loadSecurity() async {
-    final results = await Future.wait([
-      _appLockService.readConfiguration(),
-      _appLockService.availableBiometrics(),
-    ]);
+  Future<void> _loadProfile() async {
+    ErpNextSession? session;
+    try {
+      session = await _sessionStorage.read();
+    } catch (_) {
+      // The active in-memory session still provides profile information.
+    }
+    session ??= widget.appState.activeErpNextSession;
     if (!mounted) return;
 
-    final configuration = results[0] as AppLockConfiguration;
-    final biometrics = results[1] as List<BiometricType>;
     setState(() {
-      _lockConfiguration = configuration;
-      _hasEnrolledBiometrics = biometrics.isNotEmpty;
-      _biometricName = biometrics.contains(BiometricType.fingerprint)
-          ? 'Fingerprint unlock'
-          : biometrics.contains(BiometricType.face)
-          ? 'Face unlock'
-          : 'Biometric unlock';
-      _isLoadingSecurity = false;
+      _session = session;
+      _isLoadingProfile = false;
     });
   }
 
-  Future<void> _setAppLockEnabled(bool enabled) async {
-    if (_isUpdatingSecurity) return;
+  Future<void> _showProfile() async {
+    if (_isLoadingProfile) return;
 
-    if (enabled) {
-      final saved = await Navigator.of(context).push<bool>(
-        MaterialPageRoute(
-          builder: (_) => PatternSetupScreen(appLockService: _appLockService),
-        ),
-      );
-      if (saved == true) {
-        await _loadSecurity();
-        _showApiMessage('App lock enabled.');
-      }
-      return;
-    }
+    final session = _session ?? widget.appState.activeErpNextSession;
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (sheetContext) {
+        final displayName = session?.fullName.trim();
+        final userId = session?.userId.trim();
 
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                CircleAvatar(
+                  radius: 34,
+                  backgroundColor: Theme.of(
+                    sheetContext,
+                  ).colorScheme.primaryContainer,
+                  child: Text(
+                    _profileInitials(displayName, userId),
+                    style: TextStyle(
+                      color: Theme.of(
+                        sheetContext,
+                      ).colorScheme.onPrimaryContainer,
+                      fontSize: 22,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                Text(
+                  displayName == null || displayName.isEmpty
+                      ? 'Signed-in user'
+                      : displayName,
+                  key: const Key('profile-full-name'),
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Theme.of(sheetContext).colorScheme.onSurface,
+                    fontSize: 20,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  userId == null || userId.isEmpty ? 'ERPNext account' : userId,
+                  key: const Key('profile-user-id'),
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Theme.of(sheetContext).colorScheme.onSurfaceVariant,
+                    fontSize: 14,
+                  ),
+                ),
+                const SizedBox(height: 24),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    key: const Key('profile-logout-button'),
+                    onPressed: _isLoggingOut
+                        ? null
+                        : () {
+                            Navigator.of(sheetContext).pop();
+                            _confirmLogout();
+                          },
+                    icon: Image.asset(
+                      'lib/images/switch.png',
+                      width: 20,
+                      height: 20,
+                    ),
+                    label: const Text('Logout'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppColors.warning,
+                      side: const BorderSide(color: AppColors.warning),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _confirmLogout() async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('Turn off app lock?'),
+        title: const Text('Logout?'),
         content: const Text(
-          'Your saved app pattern will be removed. You can create a new one '
-          'later.',
+          'You will need to enter your ERPNext username and password again.',
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
             child: const Text('Cancel'),
           ),
-          FilledButton(
+          FilledButton.icon(
+            key: const Key('confirm-logout-button'),
             onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('Turn off'),
+            icon: Image.asset('lib/images/switch.png', width: 20, height: 20),
+            label: const Text('Logout'),
           ),
         ],
       ),
     );
-    if (confirmed != true || !mounted) return;
 
-    setState(() {
-      _isUpdatingSecurity = true;
-    });
-    try {
-      await _appLockService.disable();
-      await _loadSecurity();
-      _showApiMessage('App lock turned off.');
-    } catch (_) {
-      _showApiMessage('Could not update app lock.', isError: true);
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isUpdatingSecurity = false;
-        });
-      }
+    if (confirmed == true) {
+      await _logout();
     }
   }
 
-  Future<void> _setBiometricsEnabled(bool enabled) async {
-    if (_isUpdatingSecurity) return;
-
+  Future<void> _logout() async {
+    if (_isLoggingOut) return;
     setState(() {
-      _isUpdatingSecurity = true;
+      _isLoggingOut = true;
     });
-    try {
-      if (enabled) {
-        final authenticated = await _appLockService
-            .authenticateWithBiometrics();
-        if (!authenticated) {
-          _showApiMessage(
-            'Biometric verification was not completed.',
-            isError: true,
-          );
-          return;
-        }
-      }
-      await _appLockService.setBiometricsEnabled(enabled);
-      await _loadSecurity();
-      _showApiMessage(
-        enabled ? 'Biometric unlock enabled.' : 'Biometric unlock disabled.',
-      );
-    } catch (_) {
-      _showApiMessage('Could not update biometric unlock.', isError: true);
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isUpdatingSecurity = false;
-        });
-      }
-    }
-  }
 
-  Future<void> _changePattern() async {
-    final changed = await Navigator.of(context).push<bool>(
-      MaterialPageRoute(
-        builder: (_) => PatternSetupScreen(
-          appLockService: _appLockService,
-          isChangingPattern: true,
+    final session = _session ?? widget.appState.activeErpNextSession;
+    if (session != null) {
+      await _erpNextAuthenticator.logout(session);
+    }
+
+    try {
+      await _sessionStorage.clear();
+      await _credentialManager.clear();
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _isLoggingOut = false;
+      });
+      _showApiMessage('Could not clear the saved login.', isError: true);
+      return;
+    }
+
+    widget.appState.clearErpNextSession();
+    if (!mounted) return;
+
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute<void>(
+        builder: (_) => LoginScreen(
+          appState: widget.appState,
+          erpNextAuthenticator: _erpNextAuthenticator,
+          sessionStorage: _sessionStorage,
+          credentialManager: _credentialManager,
         ),
       ),
+      (_) => false,
     );
-    if (changed == true) {
-      await _loadSecurity();
-      _showApiMessage('App pattern changed.');
-    }
+  }
+
+  static String _profileInitials(String? fullName, String? userId) {
+    final source = fullName?.trim().isNotEmpty == true
+        ? fullName!.trim()
+        : userId?.trim() ?? '';
+    final parts = source
+        .split(RegExp(r'\s+'))
+        .where((part) => part.isNotEmpty)
+        .toList();
+    if (parts.isEmpty) return '?';
+    if (parts.length == 1) return parts.first[0].toUpperCase();
+    return '${parts.first[0]}${parts.last[0]}'.toUpperCase();
   }
 
   Future<void> _loadApiUrl() async {
@@ -237,6 +304,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Settings'),
+        actions: [
+          IconButton(
+            key: const Key('settings-profile-button'),
+            tooltip: 'Profile and logout',
+            onPressed: _isLoadingProfile || _isLoggingOut ? null : _showProfile,
+            icon: _isLoadingProfile
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : Image.asset('lib/images/switch.png', width: 28, height: 28),
+          ),
+          const SizedBox(width: 8),
+        ],
         leading: IconButton(
           tooltip: 'Back',
           icon: const Icon(Icons.arrow_back_rounded),
@@ -256,19 +338,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
+              Text(
                 'Personalise your workspace',
                 style: TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.w400,
-                  color: AppColors.ink,
+                  color: Theme.of(context).colorScheme.onSurface,
                   letterSpacing: -0.2,
                 ),
               ),
               const SizedBox(height: 6),
-              const Text(
+              Text(
                 'Manage recording behaviour and connections.',
-                style: TextStyle(fontSize: 13, color: AppColors.muted),
+                style: TextStyle(
+                  fontSize: 13,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
               ),
               const SizedBox(height: 26),
 
@@ -281,7 +366,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
                     _buildSectionHeader('Call Settings'),
                     _buildSwitchTile(
-                      icon: Icons.mic_none_rounded,
+                      iconAsset: 'lib/images/rec-button.png',
                       title: 'Auto-Record Calls',
                       subtitle: 'Automatically record all incoming calls',
                       value: _autoRecordCalls,
@@ -293,66 +378,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                     const SizedBox(height: 24),
 
-                    _buildSectionHeader('App Security'),
-                    _buildSwitchTile(
-                      icon: Icons.lock_outline_rounded,
-                      title: 'App Lock',
-                      subtitle: 'Require unlock before the splash screen',
-                      value: _lockConfiguration.enabled,
-                      onChanged: _isLoadingSecurity || _isUpdatingSecurity
-                          ? null
-                          : _setAppLockEnabled,
-                    ),
-                    const SizedBox(height: 10),
-                    _buildSwitchTile(
-                      icon: Icons.fingerprint_rounded,
-                      title: _biometricName,
-                      subtitle: _hasEnrolledBiometrics
-                          ? 'Uses biometrics enrolled in this phone'
-                          : 'No enrolled phone biometrics found',
-                      value: _lockConfiguration.biometricsEnabled,
-                      onChanged:
-                          _isLoadingSecurity ||
-                              _isUpdatingSecurity ||
-                              !_lockConfiguration.enabled ||
-                              !_hasEnrolledBiometrics
-                          ? null
-                          : _setBiometricsEnabled,
-                    ),
-                    if (_lockConfiguration.enabled) ...[
-                      const SizedBox(height: 10),
-                      _buildActionTile(
-                        icon: Icons.pattern_rounded,
-                        title: 'Change app pattern',
-                        subtitle: 'Create a new 3×3 unlock pattern',
-                        onTap: _isUpdatingSecurity ? null : _changePattern,
-                      ),
-                    ],
-                    const Padding(
-                      padding: EdgeInsets.fromLTRB(4, 10, 4, 0),
-                      child: Text(
-                        'Biometric access accepts any fingerprint or face '
-                        'already enrolled by the phone. Use the app pattern '
-                        'for another authorised user.',
-                        style: TextStyle(
-                          fontSize: 12,
-                          height: 1.35,
-                          color: AppColors.muted,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 24),
-
                     _buildSectionHeader('Appearance'),
                     _buildSwitchTile(
-                      icon: Icons.dark_mode_outlined,
+                      iconAsset: 'lib/images/night-mode.png',
                       title: 'Dark Mode',
                       subtitle: 'Switch between light and dark theme',
-                      value: _darkMode,
-                      onChanged: (value) {
-                        setState(() {
-                          _darkMode = value;
-                        });
+                      value: widget.appState.isDarkMode,
+                      switchKey: const Key('settings-dark-mode-switch'),
+                      onChanged: (value) async {
+                        try {
+                          await widget.appState.setDarkMode(value);
+                        } catch (_) {
+                          _showApiMessage(
+                            'Could not save the theme preference.',
+                            isError: true,
+                          );
+                        }
                       },
                     ),
                   ],
@@ -378,10 +419,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Widget _buildApiUrlField() {
+    final colorScheme = Theme.of(context).colorScheme;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 4),
       decoration: AppSurfaces.card(
-        color: AppColors.surfaceMuted,
+        color: colorScheme.surfaceContainerHighest,
         radius: 14,
         elevated: false,
       ),
@@ -400,7 +442,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 border: InputBorder.none,
                 filled: false,
               ),
-              style: const TextStyle(fontSize: 14, color: AppColors.ink),
+              style: TextStyle(fontSize: 14, color: colorScheme.onSurface),
             ),
           ),
           IconButton(
@@ -424,17 +466,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Widget _buildSwitchTile({
-    required IconData icon,
+    required String iconAsset,
     required String title,
     required String subtitle,
     required bool value,
     required ValueChanged<bool>? onChanged,
+    Key? switchKey,
   }) {
+    final colorScheme = Theme.of(context).colorScheme;
     return Container(
       margin: const EdgeInsets.only(bottom: 4),
       padding: const EdgeInsets.all(16),
       decoration: AppSurfaces.card(
-        color: AppColors.surfaceMuted,
+        color: colorScheme.surfaceContainerHighest,
         radius: 14,
         elevated: false,
       ),
@@ -444,10 +488,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
             width: 42,
             height: 42,
             decoration: BoxDecoration(
-              color: AppColors.primarySoft,
+              color: colorScheme.primaryContainer,
               borderRadius: BorderRadius.circular(12),
             ),
-            child: Icon(icon, color: AppColors.primary, size: 21),
+            child: Center(
+              child: Image.asset(
+                iconAsset,
+                width: 26,
+                height: 26,
+                fit: BoxFit.contain,
+              ),
+            ),
           ),
           const SizedBox(width: 13),
           Expanded(
@@ -456,89 +507,33 @@ class _SettingsScreenState extends State<SettingsScreen> {
               children: [
                 Text(
                   title,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w400,
-                    color: AppColors.ink,
+                    color: colorScheme.onSurface,
                   ),
                 ),
                 const SizedBox(height: 2),
                 Text(
                   subtitle,
-                  style: const TextStyle(fontSize: 12, color: AppColors.muted),
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: colorScheme.onSurfaceVariant,
+                  ),
                 ),
               ],
             ),
           ),
           Switch(
+            key: switchKey,
             value: value,
             onChanged: onChanged,
             activeThumbColor: Colors.white,
             activeTrackColor: AppColors.primary,
             inactiveThumbColor: Colors.white,
-            inactiveTrackColor: AppColors.border,
+            inactiveTrackColor: colorScheme.outline,
           ),
         ],
-      ),
-    );
-  }
-
-  Widget _buildActionTile({
-    required IconData icon,
-    required String title,
-    required String subtitle,
-    required VoidCallback? onTap,
-  }) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(14),
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.all(16),
-          decoration: AppSurfaces.card(
-            color: AppColors.surfaceMuted,
-            radius: 14,
-            elevated: false,
-          ),
-          child: Row(
-            children: [
-              Container(
-                width: 42,
-                height: 42,
-                decoration: BoxDecoration(
-                  color: AppColors.primarySoft,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Icon(icon, color: AppColors.primary, size: 21),
-              ),
-              const SizedBox(width: 13),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: const TextStyle(
-                        fontSize: 14,
-                        color: AppColors.ink,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      subtitle,
-                      style: const TextStyle(
-                        fontSize: 12,
-                        color: AppColors.muted,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const Icon(Icons.chevron_right_rounded, color: AppColors.subtle),
-            ],
-          ),
-        ),
       ),
     );
   }

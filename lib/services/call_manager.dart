@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:phone_state/phone_state.dart';
 import 'package:permission_handler/permission_handler.dart';
 
@@ -10,31 +11,33 @@ class CallManager {
   // Request permissions needed for call detection
   Future<bool> requestPermissions() async {
     try {
-      print('📱 Requesting Phone permission...');
+      debugPrint('📱 Requesting Phone permission...');
       final phoneStatus = await Permission.phone.request();
-      print('   Phone: ${phoneStatus.isGranted ? "✅ GRANTED" : "❌ DENIED"}');
+      debugPrint(
+        '   Phone: ${phoneStatus.isGranted ? "✅ GRANTED" : "❌ DENIED"}',
+      );
 
-      print('📱 Requesting Microphone permission...');
+      debugPrint('📱 Requesting Microphone permission...');
       final micStatus = await Permission.microphone.request();
-      print('   Mic: ${micStatus.isGranted ? "✅ GRANTED" : "❌ DENIED"}');
+      debugPrint('   Mic: ${micStatus.isGranted ? "✅ GRANTED" : "❌ DENIED"}');
 
-      print('📱 Requesting Storage permission...');
+      debugPrint('📱 Requesting Storage permission...');
       final storageStatus = await Permission.storage.request();
-      print(
+      debugPrint(
         '   Storage: ${storageStatus.isGranted ? "✅ GRANTED" : "❌ DENIED"}',
       );
 
-      print('📱 Requesting Audio files permission...');
+      debugPrint('📱 Requesting Audio files permission...');
       final audioStatus = await Permission.audio.request();
-      print(
+      debugPrint(
         '   Audio files: ${audioStatus.isGranted ? "✅ GRANTED" : "❌ DENIED"}',
       );
 
       PermissionStatus? manageStorageStatus;
       if (Platform.isAndroid) {
-        print('📱 Requesting All files access...');
+        debugPrint('📱 Requesting All files access...');
         manageStorageStatus = await Permission.manageExternalStorage.request();
-        print(
+        debugPrint(
           '   All files: ${manageStorageStatus.isGranted ? "✅ GRANTED" : "❌ DENIED"}',
         );
       }
@@ -48,13 +51,13 @@ class CallManager {
           micStatus.isGranted &&
           hasRecordingFileAccess;
 
-      print(
+      debugPrint(
         allGranted ? '✅ All permissions granted' : '❌ Some permissions denied',
       );
 
       return allGranted;
     } catch (e) {
-      print('❌ Permission error: $e');
+      debugPrint('❌ Permission error: $e');
       return false;
     }
   }
@@ -62,8 +65,8 @@ class CallManager {
   // Start listening to call state changes
   void startListening(Function(PhoneState status) onEvent) {
     try {
-      print('👂 Starting to listen for phone state changes...');
-      print('   (Waiting for CALL_STARTED and CALL_ENDED events)\n');
+      debugPrint('👂 Starting to listen for phone state changes...');
+      debugPrint('   (Waiting for CALL_STARTED and CALL_ENDED events)\n');
 
       _subscription = PhoneState.stream.listen(
         (event) {
@@ -73,43 +76,43 @@ class CallManager {
               : 0;
           _lastEventTime = now;
 
-          print('\n═════════════════════════════════════════');
-          print('📞 CALL EVENT DETECTED!');
-          print('═════════════════════════════════════════');
-          print('Status: ${event.status}');
-          print('Number: ${event.number ?? "Unknown"}');
-          print('Time: $now');
-          print('Seconds since last event: $timeSinceLastEvent sec');
-          print('═════════════════════════════════════════\n');
+          debugPrint('\n═════════════════════════════════════════');
+          debugPrint('📞 CALL EVENT DETECTED!');
+          debugPrint('═════════════════════════════════════════');
+          debugPrint('Status: ${event.status}');
+          debugPrint('Number: ${event.number ?? "Unknown"}');
+          debugPrint('Time: $now');
+          debugPrint('Seconds since last event: $timeSinceLastEvent sec');
+          debugPrint('═════════════════════════════════════════\n');
 
           // Debug: Print the actual enum value
           if (event.status == PhoneStateStatus.CALL_STARTED) {
-            print('✅ Detected as CALL_STARTED');
+            debugPrint('✅ Detected as CALL_STARTED');
           } else if (event.status == PhoneStateStatus.CALL_ENDED) {
-            print('✅ Detected as CALL_ENDED');
+            debugPrint('✅ Detected as CALL_ENDED');
           } else {
-            print('❓ Detected as: ${event.status.runtimeType}');
+            debugPrint('❓ Detected as: ${event.status.runtimeType}');
           }
 
           onEvent(event); // Pass to callback
         },
         onError: (error, stackTrace) {
-          print('\n❌ STREAM ERROR!');
-          print('Error: $error');
-          print('StackTrace: $stackTrace');
+          debugPrint('\n❌ STREAM ERROR!');
+          debugPrint('Error: $error');
+          debugPrint('StackTrace: $stackTrace');
         },
         onDone: () {
-          print('\n⚠️ STREAM CLOSED!');
-          print('Phone state stream has ended unexpectedly');
+          debugPrint('\n⚠️ STREAM CLOSED!');
+          debugPrint('Phone state stream has ended unexpectedly');
           _subscription = null;
         },
         cancelOnError: false,
       );
 
-      print('✅ Phone state listener started successfully');
-      print('⏳ Listening for events... Keep app in foreground!\n');
+      debugPrint('✅ Phone state listener started successfully');
+      debugPrint('⏳ Listening for events... Keep app in foreground!\n');
     } catch (e) {
-      print('❌ Error starting listener: $e');
+      debugPrint('❌ Error starting listener: $e');
     }
   }
 
@@ -119,10 +122,10 @@ class CallManager {
       if (_subscription != null) {
         _subscription?.cancel();
         _subscription = null;
-        print('🛑 Phone state listener stopped');
+        debugPrint('🛑 Phone state listener stopped');
       }
     } catch (e) {
-      print('❌ Error stopping listener: $e');
+      debugPrint('❌ Error stopping listener: $e');
     }
   }
 

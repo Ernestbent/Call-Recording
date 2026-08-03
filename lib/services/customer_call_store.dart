@@ -9,9 +9,28 @@ import 'package:calls_recording/services/service_starter.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+enum RecordingUploadState { pending, uploading, uploaded, failed }
+
+class RecordingBatchUploadResult {
+  final int total;
+  final int attempted;
+  final int uploaded;
+  final int failed;
+  final int alreadyUploaded;
+
+  const RecordingBatchUploadResult({
+    required this.total,
+    required this.attempted,
+    required this.uploaded,
+    required this.failed,
+    required this.alreadyUploaded,
+  });
+}
+
 class CustomerCallStore extends ChangeNotifier {
   static const Duration _recordingWindowStartOffset = Duration(seconds: 30);
   static const Duration _recordingWindowDuration = Duration(minutes: 2);
+  static const String _darkModeKey = 'app_dark_mode_enabled';
 
   CustomerCallStore({
     CallPersistence? callPersistence,
@@ -29,13 +48,17 @@ class CustomerCallStore extends ChangeNotifier {
   final CallPersistence _callPersistence;
   final DraftPaymentCustomerSource _customerSource;
   final RecordingUploader _recordingUploader;
+  final Map<String, RecordingUploadState> _recordingUploadStates = {};
   ErpNextSession? _activeErpNextSession;
   String? _queuedPhoneNumber;
   String? _activePhoneNumber;
   String? _activeRecordingPath;
   bool _isFetchingAllRecordings = false;
+  bool _isUploadingAllRecordings = false;
   bool _isLoadingCustomers = false;
   bool _isRecordingPlaying = false;
+  bool _isDarkMode = false;
+  int _customerLoadGeneration = 0;
   String? _customerLoadError;
   String? _lastRecordingUploadError;
 
@@ -48,6 +71,7 @@ class CustomerCallStore extends ChangeNotifier {
 
   Future<void> hydrate() async {
     final prefs = await SharedPreferences.getInstance();
+    _isDarkMode = prefs.getBool(_darkModeKey) ?? false;
 
     for (var i = 0; i < _customers.length; i++) {
       _customers[i] = _withPersistedCallTimestamps(_customers[i], prefs);
@@ -57,13 +81,60 @@ class CustomerCallStore extends ChangeNotifier {
   }
 
   List<CustomerContact> get customers => List.unmodifiable(_customers);
+  ErpNextSession? get activeErpNextSession => _activeErpNextSession;
   bool get isFetchingAllRecordings => _isFetchingAllRecordings;
+  bool get isUploadingAllRecordings => _isUploadingAllRecordings;
   bool get isLoadingCustomers => _isLoadingCustomers;
   String? get customerLoadError => _customerLoadError;
   String? get lastRecordingUploadError => _lastRecordingUploadError;
+  bool get isDarkMode => _isDarkMode;
+
+  Future<void> setDarkMode(bool enabled) async {
+    if (_isDarkMode == enabled) return;
+
+    final previousValue = _isDarkMode;
+    _isDarkMode = enabled;
+    notifyListeners();
+
+    try {
+      final preferences = await SharedPreferences.getInstance();
+      await preferences.setBool(_darkModeKey, enabled);
+    } catch (_) {
+      _isDarkMode = previousValue;
+      notifyListeners();
+      rethrow;
+    }
+  }
 
   int get recordingsReadyCount =>
       _customers.where((customer) => customer.latestRecording != null).length;
+
+  int get matchedRecordingsCount => _matchedRecordingTargets.length;
+
+  int get pendingRecordingUploadsCount => _matchedRecordingTargets
+      .where(
+        (target) =>
+            recordingUploadState(target.recording) !=
+            RecordingUploadState.uploaded,
+      )
+      .length;
+
+  void clearErpNextSession() {
+    _customerLoadGeneration++;
+    _activeErpNextSession = null;
+    _customers.clear();
+    _queuedPhoneNumber = null;
+    _activePhoneNumber = null;
+    _activeRecordingPath = null;
+    _recordingUploadStates.clear();
+    _isFetchingAllRecordings = false;
+    _isUploadingAllRecordings = false;
+    _isLoadingCustomers = false;
+    _isRecordingPlaying = false;
+    _customerLoadError = null;
+    _lastRecordingUploadError = null;
+    notifyListeners();
+  }
 
   bool isActiveRecording(CallRecordingFile recording) =>
       _activeRecordingPath == recording.filePath;
@@ -71,9 +142,90 @@ class CustomerCallStore extends ChangeNotifier {
   bool isPlayingRecording(CallRecordingFile recording) =>
       isActiveRecording(recording) && _isRecordingPlaying;
 
+  RecordingUploadState recordingUploadState(CallRecordingFile recording) =>
+      _recordingUploadStates[recording.filePath] ??
+      RecordingUploadState.pending;
+
+  Future<RecordingBatchUploadResult> uploadAllRecordings() async {
+    final targets = _matchedRecordingTargets;
+    if (_isUploadingAllRecordings) {
+      return RecordingBatchUploadResult(
+        total: targets.length,
+        attempted: 0,
+        uploaded: 0,
+        failed: 0,
+        alreadyUploaded: targets
+            .where(
+              (target) =>
+                  recordingUploadState(target.recording) ==
+                  RecordingUploadState.uploaded,
+            )
+            .length,
+      );
+    }
+
+    _isUploadingAllRecordings = true;
+    _lastRecordingUploadError = null;
+    notifyListeners();
+
+    var attempted = 0;
+    var uploaded = 0;
+    var failed = 0;
+    var alreadyUploaded = 0;
+
+    try {
+      for (final target in targets) {
+        if (recordingUploadState(target.recording) ==
+            RecordingUploadState.uploaded) {
+          alreadyUploaded++;
+          continue;
+        }
+
+        final call = await _saveMatchedRecording(
+          customer: target.customer,
+          recording: target.recording,
+        );
+        if (call == null) {
+          failed++;
+          continue;
+        }
+
+        if (recordingUploadState(target.recording) ==
+            RecordingUploadState.uploaded) {
+          alreadyUploaded++;
+          continue;
+        }
+
+        attempted++;
+        final didUpload = await _uploadMatchedRecording(
+          customer: target.customer,
+          recording: target.recording,
+          call: call,
+        );
+        if (didUpload) {
+          uploaded++;
+        } else {
+          failed++;
+        }
+      }
+
+      return RecordingBatchUploadResult(
+        total: targets.length,
+        attempted: attempted,
+        uploaded: uploaded,
+        failed: failed,
+        alreadyUploaded: alreadyUploaded,
+      );
+    } finally {
+      _isUploadingAllRecordings = false;
+      notifyListeners();
+    }
+  }
+
   Future<int> loadDraftPaymentCustomers(ErpNextSession session) async {
     if (_isLoadingCustomers) return _customers.length;
 
+    final loadGeneration = ++_customerLoadGeneration;
     _activeErpNextSession = session;
     _isLoadingCustomers = true;
     _customerLoadError = null;
@@ -83,7 +235,15 @@ class CustomerCallStore extends ChangeNotifier {
       final remoteCustomers = await _customerSource.fetchDraftPaymentCustomers(
         session,
       );
+      if (loadGeneration != _customerLoadGeneration) {
+        return _customers.length;
+      }
+
       final prefs = await SharedPreferences.getInstance();
+      if (loadGeneration != _customerLoadGeneration) {
+        return _customers.length;
+      }
+
       final refreshedCustomers = <CustomerContact>[];
 
       for (final remoteCustomer in remoteCustomers) {
@@ -123,15 +283,23 @@ class CustomerCallStore extends ChangeNotifier {
         ..addAll(refreshedCustomers);
       return _customers.length;
     } on ErpNextCustomerFetchException catch (error) {
+      if (loadGeneration != _customerLoadGeneration) {
+        return _customers.length;
+      }
       _customerLoadError = error.message;
       return _customers.length;
     } catch (_) {
+      if (loadGeneration != _customerLoadGeneration) {
+        return _customers.length;
+      }
       _customerLoadError =
           'Could not refresh draft-payment customers from ERPNext.';
       return _customers.length;
     } finally {
-      _isLoadingCustomers = false;
-      notifyListeners();
+      if (loadGeneration == _customerLoadGeneration) {
+        _isLoadingCustomers = false;
+        notifyListeners();
+      }
     }
   }
 
@@ -316,10 +484,12 @@ class CustomerCallStore extends ChangeNotifier {
             : matchingRecordings.first;
         if (latestRecording != null) {
           matchedCustomers++;
-          await _saveMatchedRecording(
-            customer: currentCustomer,
-            recording: latestRecording,
-          );
+          for (final recording in matchingRecordings) {
+            await _saveMatchedRecording(
+              customer: currentCustomer,
+              recording: recording,
+            );
+          }
         }
 
         _updateCustomer(
@@ -523,12 +693,88 @@ class CustomerCallStore extends ChangeNotifier {
     }
   }
 
-  Future<void> _saveMatchedRecording({
+  Future<CallModel?> _saveMatchedRecording({
     required CustomerContact customer,
     required CallRecordingFile recording,
   }) async {
+    final call = _callForRecording(customer: customer, recording: recording);
+    if (call == null) {
+      _recordingUploadStates[recording.filePath] = RecordingUploadState.failed;
+      _lastRecordingUploadError =
+          'The call start time is missing. This recording remains pending.';
+      notifyListeners();
+      return null;
+    }
+
+    final existingCall = await _callPersistence.getCall(call.sessionId);
+    if (existingCall?['status'] == 'uploaded') {
+      _recordingUploadStates[recording.filePath] =
+          RecordingUploadState.uploaded;
+      _lastRecordingUploadError = null;
+      notifyListeners();
+      return call;
+    }
+
+    if (existingCall == null) {
+      await _callPersistence.saveCall(call.toMap());
+    }
+    if (recordingUploadState(recording) != RecordingUploadState.failed) {
+      _recordingUploadStates[recording.filePath] = RecordingUploadState.pending;
+    }
+    notifyListeners();
+    return call;
+  }
+
+  Future<bool> _uploadMatchedRecording({
+    required CustomerContact customer,
+    required CallRecordingFile recording,
+    required CallModel call,
+  }) async {
+    if (recordingUploadState(recording) == RecordingUploadState.uploading) {
+      return false;
+    }
+
+    if (!_recordingUploader.isConfigured) {
+      _recordingUploadStates[recording.filePath] = RecordingUploadState.failed;
+      _lastRecordingUploadError =
+          'Recording upload is not configured. The recordings remain pending.';
+      notifyListeners();
+      return false;
+    }
+
+    _recordingUploadStates[recording.filePath] = RecordingUploadState.uploading;
+    _lastRecordingUploadError = null;
+    notifyListeners();
+
+    try {
+      await _recordingUploader.upload(
+        call: call,
+        customerId: customer.erpNextCustomerId,
+      );
+      await _callPersistence.updateStatus(call.sessionId, 'uploaded');
+      _recordingUploadStates[recording.filePath] =
+          RecordingUploadState.uploaded;
+      _lastRecordingUploadError = null;
+      notifyListeners();
+      return true;
+    } on RecordingUploadException catch (error) {
+      _recordingUploadStates[recording.filePath] = RecordingUploadState.failed;
+      _lastRecordingUploadError = error.message;
+    } catch (_) {
+      _recordingUploadStates[recording.filePath] = RecordingUploadState.failed;
+      _lastRecordingUploadError =
+          'Could not upload the recording. It remains pending.';
+    }
+    notifyListeners();
+    return false;
+  }
+
+  CallModel? _callForRecording({
+    required CustomerContact customer,
+    required CallRecordingFile recording,
+  }) {
     final startedAt = customer.lastCallStartedAt;
-    if (startedAt == null) return;
+    if (startedAt == null) return null;
 
     final endedAt = customer.lastCallEndedAt ?? recording.lastModifiedTime;
     final durationSeconds = endedAt.isAfter(startedAt)
@@ -536,10 +782,11 @@ class CustomerCallStore extends ChangeNotifier {
         : 0;
     final normalizedPhone =
         _normalize(customer.phoneNumber) ?? customer.phoneNumber;
+    final phoneId = normalizedPhone.replaceAll(RegExp(r'[^0-9]'), '');
     final sessionId =
-        'call_${normalizedPhone.replaceAll(RegExp(r"[^0-9]"), "")}_${startedAt.millisecondsSinceEpoch}';
+        'call_${phoneId}_${startedAt.millisecondsSinceEpoch}_${recording.lastModifiedTime.millisecondsSinceEpoch}';
 
-    final call = CallModel(
+    return CallModel(
       sessionId: sessionId,
       phoneNumber: customer.phoneNumber,
       callType: 'outgoing',
@@ -548,27 +795,26 @@ class CustomerCallStore extends ChangeNotifier {
       status: 'pending',
       createdAt: startedAt.toIso8601String(),
     );
+  }
 
-    final existingCall = await _callPersistence.getCall(sessionId);
-    if (existingCall?['status'] == 'uploaded') return;
+  List<_MatchedRecordingTarget> get _matchedRecordingTargets {
+    final targets = <_MatchedRecordingTarget>[];
+    final seenPaths = <String>{};
 
-    await _callPersistence.saveCall(call.toMap());
-
-    if (!_recordingUploader.isConfigured) return;
-
-    try {
-      await _recordingUploader.upload(
-        call: call,
-        customerId: customer.erpNextCustomerId,
-      );
-      await _callPersistence.updateStatus(sessionId, 'uploaded');
-      _lastRecordingUploadError = null;
-    } on RecordingUploadException catch (error) {
-      _lastRecordingUploadError = error.message;
-    } catch (_) {
-      _lastRecordingUploadError =
-          'Could not upload the recording. It remains pending.';
+    for (final customer in _customers) {
+      final recordings = customer.availableRecordings.isEmpty
+          ? [if (customer.latestRecording != null) customer.latestRecording!]
+          : customer.availableRecordings;
+      for (final recording in recordings) {
+        if (seenPaths.add(recording.filePath)) {
+          targets.add(
+            _MatchedRecordingTarget(customer: customer, recording: recording),
+          );
+        }
+      }
     }
+
+    return targets;
   }
 
   String _startedAtKey(String normalizedPhone) =>
@@ -583,4 +829,14 @@ class CustomerCallStore extends ChangeNotifier {
     _isRecordingPlaying = false;
     notifyListeners();
   }
+}
+
+class _MatchedRecordingTarget {
+  final CustomerContact customer;
+  final CallRecordingFile recording;
+
+  const _MatchedRecordingTarget({
+    required this.customer,
+    required this.recording,
+  });
 }

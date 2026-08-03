@@ -182,18 +182,13 @@ class _RecordingsOverview extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 20),
-          Container(
+          Image.asset(
+            'lib/images/microphone.png',
             width: 54,
             height: 54,
-            decoration: BoxDecoration(
-              color: AppColors.primarySoft,
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: const Icon(
-              Icons.graphic_eq_rounded,
-              color: AppColors.primary,
-              size: 25,
-            ),
+            fit: BoxFit.contain,
+            filterQuality: FilterQuality.high,
+            semanticLabel: 'Microphone',
           ),
         ],
       ),

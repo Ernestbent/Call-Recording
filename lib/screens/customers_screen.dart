@@ -59,155 +59,229 @@ class CustomersScreen extends StatelessWidget {
           builder: (context, _) {
             final customers = appState.customers;
 
-            return Padding(
-              padding: const EdgeInsets.fromLTRB(20, 22, 20, 0),
-              child: CustomScrollView(
-                slivers: [
-                  if (appState.isLoadingCustomers)
-                    const SliverToBoxAdapter(
-                      child: Column(
-                        children: [
-                          LinearProgressIndicator(),
-                          SizedBox(height: 14),
-                        ],
+            Widget buildCustomerCard(CustomerContact customer) {
+              return _CustomerCard(
+                customer: customer,
+                onCallTap: () async {
+                  final didOpen = await appState.dialCustomer(customer);
+
+                  if (!context.mounted || didOpen) return;
+
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Unable to open dialer right now.'),
+                    ),
+                  );
+                },
+                onPlayTap: (recording) async {
+                  final wasPlaying = appState.isPlayingRecording(recording);
+                  final didStart = await appState.playRecording(recording);
+                  if (!context.mounted) return;
+
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(
+                        didStart
+                            ? wasPlaying
+                                  ? 'Playback paused'
+                                  : 'Playing ${recording.fileName}'
+                            : 'Unable to play this recording.',
                       ),
                     ),
-                  if (appState.customerLoadError != null)
-                    SliverToBoxAdapter(
-                      child: Column(
-                        children: [
-                          _CustomerLoadError(
-                            message: appState.customerLoadError!,
-                          ),
-                          const SizedBox(height: 14),
-                        ],
-                      ),
-                    ),
-                  SliverToBoxAdapter(
-                    child: _SummaryCard(
-                      recordingsReadyCount: appState.recordingsReadyCount,
-                    ),
+                  );
+                },
+                isActiveRecording: appState.isActiveRecording,
+                isPlayingRecording: appState.isPlayingRecording,
+              );
+            }
+
+            Widget buildHeader() {
+              return Column(
+                key: const Key('customers-fixed-header'),
+                children: [
+                  if (appState.isLoadingCustomers) ...[
+                    const LinearProgressIndicator(),
+                    const SizedBox(height: 14),
+                  ],
+                  if (appState.customerLoadError != null) ...[
+                    _CustomerLoadError(message: appState.customerLoadError!),
+                    const SizedBox(height: 14),
+                  ],
+                  _SummaryCard(
+                    recordingsReadyCount: appState.recordingsReadyCount,
                   ),
-                  const SliverToBoxAdapter(child: SizedBox(height: 14)),
-                  SliverToBoxAdapter(
-                    child: SizedBox(
-                      width: double.infinity,
-                      child: FilledButton.icon(
-                        onPressed: appState.isFetchingAllRecordings
-                            ? null
-                            : () async {
-                                final matches = await appState
-                                    .fetchRecordingsForAllCustomers();
+                  const SizedBox(height: 14),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      key: const Key('fetch-all-recordings-button'),
+                      onPressed:
+                          appState.isFetchingAllRecordings ||
+                              appState.isUploadingAllRecordings
+                          ? null
+                          : () async {
+                              final matches = await appState
+                                  .fetchRecordingsForAllCustomers();
 
-                                if (!context.mounted) return;
+                              if (!context.mounted) return;
 
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                    content: Text(
-                                      matches == 0
-                                          ? 'No recordings matched calls made from this app.'
-                                          : 'Matched recordings for $matches customer${matches == 1 ? '' : 's'}.',
-                                    ),
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                    matches == 0
+                                        ? 'No recordings matched calls made from this app.'
+                                        : 'Matched recordings for $matches customer${matches == 1 ? '' : 's'}.',
                                   ),
-                                );
-                              },
-                        style: FilledButton.styleFrom(
-                          backgroundColor: AppColors.primary,
-                          foregroundColor: Colors.white,
-                          disabledBackgroundColor: AppColors.border,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          padding: const EdgeInsets.symmetric(vertical: 15),
+                                ),
+                              );
+                            },
+                      style: FilledButton.styleFrom(
+                        backgroundColor: AppColors.primary,
+                        foregroundColor: Colors.white,
+                        disabledBackgroundColor: AppColors.border,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
                         ),
-                        icon: Icon(
-                          appState.isFetchingAllRecordings
-                              ? Icons.sync_rounded
-                              : Icons.library_music_rounded,
-                          size: 18,
-                        ),
-                        label: Text(
-                          appState.isFetchingAllRecordings
-                              ? 'Fetching recordings...'
-                              : 'Fetch All Recordings',
-                          style: const TextStyle(
-                            fontFamily: 'Bubblegum Sans',
-                            fontWeight: FontWeight.w400,
-                          ),
-                        ),
+                        padding: const EdgeInsets.symmetric(vertical: 15),
                       ),
-                    ),
-                  ),
-                  const SliverToBoxAdapter(child: SizedBox(height: 26)),
-                  SliverToBoxAdapter(
-                    child: SectionLabel(
-                      'Customer calls',
-                      trailing: Text(
-                        '${customers.length} contacts',
+                      icon: Icon(
+                        appState.isFetchingAllRecordings
+                            ? Icons.sync_rounded
+                            : Icons.library_music_rounded,
+                        size: 18,
+                      ),
+                      label: Text(
+                        appState.isFetchingAllRecordings
+                            ? 'Fetching recordings...'
+                            : 'Fetch All Recordings',
                         style: const TextStyle(
-                          color: AppColors.subtle,
-                          fontSize: 12,
+                          fontFamily: 'Bubblegum Sans',
                           fontWeight: FontWeight.w400,
                         ),
                       ),
                     ),
                   ),
-                  const SliverToBoxAdapter(child: SizedBox(height: 12)),
-                  if (customers.isEmpty)
-                    const SliverToBoxAdapter(child: _EmptyCustomersState())
-                  else
-                    SliverList(
-                      delegate: SliverChildBuilderDelegate((context, index) {
-                        if (index.isOdd) {
-                          return const SizedBox(height: 12);
-                        }
+                  const SizedBox(height: 10),
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      key: const Key('upload-all-recordings-button'),
+                      onPressed:
+                          appState.isUploadingAllRecordings ||
+                              appState.isFetchingAllRecordings ||
+                              appState.matchedRecordingsCount == 0
+                          ? null
+                          : () async {
+                              final result = await appState
+                                  .uploadAllRecordings();
+                              if (!context.mounted) return;
 
-                        final customer = customers[index ~/ 2];
-                        return _CustomerCard(
-                          customer: customer,
-                          onCallTap: () async {
-                            final didOpen = await appState.dialCustomer(
-                              customer,
-                            );
+                              final message = switch (result) {
+                                RecordingBatchUploadResult(total: 0) =>
+                                  'Fetch or record calls before uploading.',
+                                RecordingBatchUploadResult(
+                                  attempted: 0,
+                                  failed: 0,
+                                ) =>
+                                  'All recordings are already uploaded.',
+                                RecordingBatchUploadResult(failed: 0) =>
+                                  'Uploaded ${result.uploaded} recording${result.uploaded == 1 ? '' : 's'}.',
+                                _ =>
+                                  'Uploaded ${result.uploaded} of ${result.attempted}. ${result.failed} recording${result.failed == 1 ? '' : 's'} remain pending.',
+                              };
 
-                            if (!context.mounted || didOpen) return;
-
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text(
-                                  'Unable to open dialer right now.',
-                                ),
-                              ),
-                            );
-                          },
-                          onPlayTap: (recording) async {
-                            final wasPlaying = appState.isPlayingRecording(
-                              recording,
-                            );
-                            final didStart = await appState.playRecording(
-                              recording,
-                            );
-                            if (!context.mounted) return;
-
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text(
-                                  didStart
-                                      ? wasPlaying
-                                            ? 'Playback paused'
-                                            : 'Playing ${recording.fileName}'
-                                      : 'Unable to play this recording.',
-                                ),
-                              ),
-                            );
-                          },
-                          isActiveRecording: appState.isActiveRecording,
-                          isPlayingRecording: appState.isPlayingRecording,
-                        );
-                      }, childCount: (customers.length * 2) - 1),
+                              ScaffoldMessenger.of(
+                                context,
+                              ).showSnackBar(SnackBar(content: Text(message)));
+                            },
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: AppColors.primary,
+                        side: const BorderSide(color: AppColors.primary),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        padding: const EdgeInsets.symmetric(vertical: 15),
+                      ),
+                      icon: appState.isUploadingAllRecordings
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.cloud_upload_rounded, size: 18),
+                      label: Text(
+                        appState.isUploadingAllRecordings
+                            ? 'Uploading all recordings...'
+                            : appState.pendingRecordingUploadsCount == 0 &&
+                                  appState.matchedRecordingsCount > 0
+                            ? 'All Recordings Uploaded'
+                            : 'Upload All Recordings (${appState.pendingRecordingUploadsCount})',
+                        style: const TextStyle(
+                          fontFamily: 'Bubblegum Sans',
+                          fontWeight: FontWeight.w400,
+                        ),
+                      ),
                     ),
-                  const SliverToBoxAdapter(child: SizedBox(height: 20)),
+                  ),
+                  const SizedBox(height: 26),
+                  SectionLabel(
+                    'Customer calls',
+                    trailing: Text(
+                      '${customers.length} contacts',
+                      style: const TextStyle(
+                        color: AppColors.subtle,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w400,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
                 ],
+              );
+            }
+
+            List<Widget> buildCustomerSlivers() {
+              return [
+                if (customers.isEmpty)
+                  const SliverToBoxAdapter(child: _EmptyCustomersState())
+                else
+                  SliverList(
+                    delegate: SliverChildBuilderDelegate((context, index) {
+                      if (index.isOdd) {
+                        return const SizedBox(height: 12);
+                      }
+                      return buildCustomerCard(customers[index ~/ 2]);
+                    }, childCount: (customers.length * 2) - 1),
+                  ),
+                const SliverToBoxAdapter(child: SizedBox(height: 20)),
+              ];
+            }
+
+            return Padding(
+              padding: const EdgeInsets.fromLTRB(20, 22, 20, 0),
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  if (constraints.maxHeight < 360) {
+                    return CustomScrollView(
+                      slivers: [
+                        SliverToBoxAdapter(child: buildHeader()),
+                        ...buildCustomerSlivers(),
+                      ],
+                    );
+                  }
+
+                  return Column(
+                    children: [
+                      buildHeader(),
+                      Expanded(
+                        child: CustomScrollView(
+                          key: const Key('customer-cards-scroll-view'),
+                          slivers: buildCustomerSlivers(),
+                        ),
+                      ),
+                    ],
+                  );
+                },
               ),
             );
           },
@@ -293,6 +367,7 @@ class _SummaryCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
+      key: const Key('customers-summary-card'),
       width: double.infinity,
       height: 156,
       decoration: AppSurfaces.card(radius: 18),
@@ -340,21 +415,13 @@ class _SummaryCard extends StatelessWidget {
           ),
           Padding(
             padding: const EdgeInsets.only(right: 22),
-            child: Container(
+            child: Image.asset(
+              'lib/images/headphone.png',
               width: 54,
               height: 54,
-              decoration: BoxDecoration(
-                color: AppColors.primarySoft,
-                borderRadius: BorderRadius.circular(14),
-              ),
-              child: Image.asset(
-                'lib/fonts/customer-service-headset.png',
-                width: 25,
-                height: 25,
-                color: AppColors.primary,
-                filterQuality: FilterQuality.high,
-                semanticLabel: 'Customer service headset',
-              ),
+              fit: BoxFit.contain,
+              filterQuality: FilterQuality.high,
+              semanticLabel: 'Headphones',
             ),
           ),
         ],
@@ -389,6 +456,7 @@ class _CustomerCard extends StatelessWidget {
           Row(
             children: [
               _CustomerAvatar(
+                key: Key('customer-avatar-${customer.phoneNumber}'),
                 name: customer.name,
                 imageUrl: customer.profileImageUrl,
                 imageHeaders: customer.profileImageHeaders,
@@ -428,26 +496,10 @@ class _CustomerCard extends StatelessWidget {
                   ],
                 ),
               ),
-              FilledButton(
+              _PulsingCallButton(
+                key: Key('call-customer-${customer.phoneNumber}'),
                 onPressed: onCallTap,
-                style: FilledButton.styleFrom(
-                  backgroundColor: AppColors.primary,
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 18,
-                    vertical: 12,
-                  ),
-                ),
-                child: const Text(
-                  'Call',
-                  style: TextStyle(
-                    fontFamily: 'Bubblegum Sans',
-                    fontWeight: FontWeight.w400,
-                  ),
-                ),
+                customerName: customer.name,
               ),
             ],
           ),
@@ -528,19 +580,231 @@ class _CustomerCard extends StatelessWidget {
   }
 }
 
+class _PulsingCallButton extends StatefulWidget {
+  final String customerName;
+  final VoidCallback onPressed;
+
+  const _PulsingCallButton({
+    super.key,
+    required this.customerName,
+    required this.onPressed,
+  });
+
+  @override
+  State<_PulsingCallButton> createState() => _PulsingCallButtonState();
+}
+
+class _PulsingCallButtonState extends State<_PulsingCallButton>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+  late final Animation<double> _scale;
+  bool _hasStarted = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 650),
+    );
+    _scale = TweenSequence<double>([
+      TweenSequenceItem(
+        tween: Tween<double>(
+          begin: 1.0,
+          end: 1.14,
+        ).chain(CurveTween(curve: Curves.easeOutBack)),
+        weight: 42,
+      ),
+      TweenSequenceItem(
+        tween: Tween<double>(
+          begin: 1.14,
+          end: 0.96,
+        ).chain(CurveTween(curve: Curves.easeInOut)),
+        weight: 24,
+      ),
+      TweenSequenceItem(
+        tween: Tween<double>(
+          begin: 0.96,
+          end: 1.0,
+        ).chain(CurveTween(curve: Curves.easeOut)),
+        weight: 34,
+      ),
+    ]).animate(_controller);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_hasStarted) return;
+    _hasStarted = true;
+
+    final animationsDisabled =
+        MediaQuery.maybeOf(context)?.disableAnimations ?? false;
+    if (!animationsDisabled) {
+      _controller.repeat(count: 3);
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, child) {
+        final pulse = math.sin(_controller.value * math.pi).abs();
+        return Transform.scale(
+          scale: _scale.value,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              boxShadow: [
+                BoxShadow(
+                  color: AppColors.primary.withValues(
+                    alpha: 0.12 + (pulse * 0.2),
+                  ),
+                  blurRadius: 8 + (pulse * 8),
+                  spreadRadius: pulse * 2,
+                ),
+              ],
+            ),
+            child: child,
+          ),
+        );
+      },
+      child: IconButton(
+        onPressed: widget.onPressed,
+        tooltip: 'Call ${widget.customerName}',
+        iconSize: 44,
+        padding: const EdgeInsets.all(4),
+        icon: Image.asset(
+          'lib/images/call-center.png',
+          width: 44,
+          height: 44,
+          fit: BoxFit.contain,
+          filterQuality: FilterQuality.high,
+          semanticLabel: 'Call ${widget.customerName}',
+        ),
+        style: IconButton.styleFrom(
+          minimumSize: const Size(48, 48),
+          tapTargetSize: MaterialTapTargetSize.padded,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _CustomerAvatar extends StatelessWidget {
   final String name;
   final String? imageUrl;
   final Map<String, String> imageHeaders;
 
   const _CustomerAvatar({
+    super.key,
     required this.name,
     required this.imageUrl,
     required this.imageHeaders,
   });
 
+  void _showLargeImage(BuildContext context, String resolvedImageUrl) {
+    showDialog<void>(
+      context: context,
+      barrierColor: Colors.black87,
+      builder: (dialogContext) {
+        final screenSize = MediaQuery.sizeOf(dialogContext);
+        return Dialog.fullscreen(
+          key: const Key('customer-image-viewer'),
+          backgroundColor: Colors.black,
+          child: SafeArea(
+            child: Stack(
+              children: [
+                Positioned.fill(
+                  child: InteractiveViewer(
+                    minScale: 0.8,
+                    maxScale: 4,
+                    child: Center(
+                      child: Image.network(
+                        resolvedImageUrl,
+                        headers: imageHeaders,
+                        width: screenSize.width,
+                        height: screenSize.height,
+                        fit: BoxFit.contain,
+                        semanticLabel: 'Large photo of $name',
+                        loadingBuilder: (context, child, progress) {
+                          if (progress == null) return child;
+                          return const Center(
+                            child: CircularProgressIndicator(
+                              color: Colors.white,
+                            ),
+                          );
+                        },
+                        errorBuilder: (_, _, _) => const Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.broken_image_outlined,
+                              color: Colors.white70,
+                              size: 52,
+                            ),
+                            SizedBox(height: 12),
+                            Text(
+                              'Unable to load this customer photo.',
+                              style: TextStyle(color: Colors.white70),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                Positioned(
+                  top: 8,
+                  right: 8,
+                  child: IconButton.filled(
+                    key: const Key('close-customer-image-viewer'),
+                    tooltip: 'Close photo',
+                    onPressed: () => Navigator.of(dialogContext).pop(),
+                    style: IconButton.styleFrom(
+                      backgroundColor: Colors.black54,
+                      foregroundColor: Colors.white,
+                    ),
+                    icon: const Icon(Icons.close_rounded),
+                  ),
+                ),
+                Positioned(
+                  left: 20,
+                  right: 72,
+                  bottom: 18,
+                  child: Text(
+                    name,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
+                      shadows: [Shadow(color: Colors.black, blurRadius: 8)],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final resolvedImageUrl = imageUrl?.trim();
+    final hasImage = resolvedImageUrl != null && resolvedImageUrl.isNotEmpty;
     final fallback = Center(
       child: Text(
         _CustomerCard._initials(name),
@@ -552,21 +816,39 @@ class _CustomerAvatar extends StatelessWidget {
       ),
     );
 
-    return ClipRRect(
+    final avatar = ClipRRect(
       borderRadius: BorderRadius.circular(14),
       child: ColoredBox(
         color: AppColors.primarySoft,
         child: SizedBox(
           width: 48,
           height: 48,
-          child: imageUrl == null
+          child: !hasImage
               ? fallback
               : Image.network(
-                  imageUrl!,
+                  resolvedImageUrl,
                   headers: imageHeaders,
                   fit: BoxFit.cover,
                   errorBuilder: (_, _, _) => fallback,
                 ),
+        ),
+      ),
+    );
+
+    if (!hasImage) return avatar;
+
+    return Semantics(
+      button: true,
+      label: 'View photo of $name',
+      child: Tooltip(
+        message: 'View photo of $name',
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: () => _showLargeImage(context, resolvedImageUrl),
+            borderRadius: BorderRadius.circular(14),
+            child: avatar,
+          ),
         ),
       ),
     );

@@ -3,26 +3,31 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:calls_recording/db/call_model.dart';
+import 'package:calls_recording/services/agent_credential_service.dart';
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class RecordingUploadSettings {
   static const String _endpointKey = 'recording_upload_endpoint';
+  static final Uri defaultEndpoint = Uri.parse(
+    'https://erp.autozonepro.org/api/mobile/call-logs/',
+  );
   static const String _initialEndpoint = String.fromEnvironment(
     'RECORDING_UPLOAD_INITIAL_URL',
   );
 
   Future<Uri?> readEndpoint() async {
     final preferences = await SharedPreferences.getInstance();
-    final savedEndpoint = parseEndpoint(preferences.getString(_endpointKey));
-    if (savedEndpoint != null) return savedEndpoint;
-
     final initialEndpoint = parseEndpoint(_initialEndpoint);
     if (initialEndpoint != null) {
       await preferences.setString(_endpointKey, initialEndpoint.toString());
+      return initialEndpoint;
     }
-    return initialEndpoint;
+
+    final savedEndpoint = parseEndpoint(preferences.getString(_endpointKey));
+    if (savedEndpoint != null) return savedEndpoint;
+    return defaultEndpoint;
   }
 
   Future<void> saveEndpoint(String value) async {
@@ -75,37 +80,36 @@ class RecordingUploadException implements Exception {
 }
 
 class HttpRecordingUploader implements RecordingUploader {
-  static const String _configuredToken = String.fromEnvironment(
-    'RECORDING_UPLOAD_TOKEN',
-  );
   static const Duration _uploadTimeout = Duration(minutes: 2);
 
   final Uri? _endpointOverride;
-  final String bearerToken;
   final http.Client _client;
   final RecordingUploadSettings _settings;
+  final ApiCredentialProvider _credentialProvider;
 
   HttpRecordingUploader({
     Uri? endpoint,
-    String? bearerToken,
     http.Client? client,
     RecordingUploadSettings? settings,
+    ApiCredentialProvider? credentialProvider,
   }) : _endpointOverride = endpoint,
-       bearerToken = bearerToken ?? _configuredToken,
        _client = client ?? http.Client(),
-       _settings = settings ?? RecordingUploadSettings();
+       _settings = settings ?? RecordingUploadSettings(),
+       _credentialProvider =
+           credentialProvider ?? SecureAgentCredentialManager();
 
   @override
-  bool get isConfigured => bearerToken.trim().isNotEmpty;
+  bool get isConfigured => true;
 
   @override
   Future<RecordingUploadResult> upload({
     required CallModel call,
     String? customerId,
   }) async {
-    if (!isConfigured) {
+    final credentials = await _credentialProvider.read();
+    if (credentials == null) {
       throw const RecordingUploadException(
-        'The recording upload token is not configured.',
+        'Sign in again before uploading recordings.',
       );
     }
 
@@ -113,6 +117,13 @@ class HttpRecordingUploader implements RecordingUploader {
     if (endpoint == null) {
       throw const RecordingUploadException(
         'Set the recording API URL in Settings before uploading.',
+      );
+    }
+
+    final normalizedCustomerId = customerId?.trim() ?? '';
+    if (normalizedCustomerId.isEmpty) {
+      throw const RecordingUploadException(
+        'This recording has no ERPNext customer ID. It remains pending.',
       );
     }
 
@@ -124,24 +135,32 @@ class HttpRecordingUploader implements RecordingUploader {
     }
 
     try {
+      final callStartedAt = DateTime.tryParse(call.createdAt);
+      if (callStartedAt == null) {
+        throw const RecordingUploadException(
+          'This recording has an invalid call date. It remains pending.',
+        );
+      }
+      final localCallStartedAt = callStartedAt.toLocal();
+
       final request = http.MultipartRequest('POST', endpoint)
         ..headers.addAll({
           'Accept': 'application/json',
-          'Authorization': 'Bearer ${bearerToken.trim()}',
-          'ngrok-skip-browser-warning': 'true',
+          'Authorization':
+              'token ${credentials.apiKey}:${credentials.apiSecret}',
         })
         ..fields.addAll({
-          'session_id': call.sessionId,
-          'phone_number': call.phoneNumber,
+          'device_local_id': call.sessionId,
+          'customer_id': normalizedCustomerId,
+          'mobile_no': call.phoneNumber,
+          'call_date': _formatDate(localCallStartedAt),
+          'call_time': _formatTime(localCallStartedAt),
+          'duration_seconds': '${call.duration}',
           'call_type': call.callType,
-          'duration': '${call.duration}',
-          'created_at': call.createdAt,
-          if (customerId != null && customerId.trim().isNotEmpty)
-            'customer_id': customerId.trim(),
         })
         ..files.add(
           await http.MultipartFile.fromPath(
-            'recording',
+            'audio_file',
             call.audioPath,
             contentType: _contentTypeFor(call.audioPath),
           ),
@@ -152,23 +171,33 @@ class HttpRecordingUploader implements RecordingUploader {
           .timeout(_uploadTimeout);
       final response = await http.Response.fromStream(streamedResponse);
 
+      if (response.statusCode == 401) {
+        throw const RecordingUploadException(
+          'Upload credentials were rejected. Sign in again.',
+        );
+      }
       if (response.statusCode < 200 || response.statusCode >= 300) {
+        final serverError = _serverError(response.body);
         throw RecordingUploadException(
-          'Upload server returned ${response.statusCode}.',
+          serverError ??
+              'Upload server returned ${response.statusCode}. It remains pending.',
         );
       }
 
       final decoded = jsonDecode(response.body);
-      if (decoded is! Map<String, dynamic> || decoded['success'] != true) {
+      if (decoded is! Map<String, dynamic> || decoded['ok'] != true) {
         throw const RecordingUploadException(
           'Upload server did not confirm the recording.',
         );
       }
 
-      final uploadId = decoded['upload_id']?.toString().trim() ?? '';
+      final callLog = decoded['call_log'];
+      final uploadId = callLog is Map
+          ? callLog['id']?.toString().trim() ?? ''
+          : '';
       if (uploadId.isEmpty) {
         throw const RecordingUploadException(
-          'Upload server did not return an upload ID.',
+          'Upload server did not return a call-log ID.',
         );
       }
 
@@ -196,6 +225,31 @@ class HttpRecordingUploader implements RecordingUploader {
       throw const RecordingUploadException(
         'Could not upload the recording. It remains pending.',
       );
+    }
+  }
+
+  static String _formatDate(DateTime value) {
+    final year = value.year.toString().padLeft(4, '0');
+    final month = value.month.toString().padLeft(2, '0');
+    final day = value.day.toString().padLeft(2, '0');
+    return '$year-$month-$day';
+  }
+
+  static String _formatTime(DateTime value) {
+    final hour = value.hour.toString().padLeft(2, '0');
+    final minute = value.minute.toString().padLeft(2, '0');
+    final second = value.second.toString().padLeft(2, '0');
+    return '$hour:$minute:$second';
+  }
+
+  static String? _serverError(String responseBody) {
+    try {
+      final decoded = jsonDecode(responseBody);
+      if (decoded is! Map<String, dynamic>) return null;
+      final error = decoded['error']?.toString().trim();
+      return error == null || error.isEmpty ? null : error;
+    } catch (_) {
+      return null;
     }
   }
 

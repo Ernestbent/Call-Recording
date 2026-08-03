@@ -3,6 +3,7 @@ import 'package:calls_recording/services/call_manager.dart';
 import 'package:calls_recording/services/customer_call_store.dart';
 import 'package:calls_recording/services/session_manager.dart';
 import 'package:calls_recording/services/service_starter.dart';
+import 'package:flutter/foundation.dart';
 import 'package:phone_state/phone_state.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -27,29 +28,29 @@ class CallController {
 
   // Start everything
   Future<void> init() async {
-    print('\n════════════════════════════════════════════════════');
-    print('🚀 INITIALIZING CALL CONTROLLER');
-    print('════════════════════════════════════════════════════\n');
+    debugPrint('\n════════════════════════════════════════════════════');
+    debugPrint('🚀 INITIALIZING CALL CONTROLLER');
+    debugPrint('════════════════════════════════════════════════════\n');
 
     // Request permissions
-    print('Step 1: Requesting permissions...');
+    debugPrint('Step 1: Requesting permissions...');
     final granted = await callManager.requestPermissions();
 
     if (!granted) {
-      print('\n❌ PERMISSIONS DENIED - Cannot continue!');
-      print('════════════════════════════════════════════════════\n');
+      debugPrint('\n❌ PERMISSIONS DENIED - Cannot continue!');
+      debugPrint('════════════════════════════════════════════════════\n');
       return;
     }
 
     // Start listening
-    print('\nStep 2: Starting phone state listener...');
+    debugPrint('\nStep 2: Starting phone state listener...');
     callManager.startListening((PhoneState event) {
       _handleCallEvent(event);
     });
 
-    print('\n✅ CALL CONTROLLER INITIALIZED SUCCESSFULLY');
-    print('════════════════════════════════════════════════════');
-    print('⏳ Waiting for phone calls...\n');
+    debugPrint('\n✅ CALL CONTROLLER INITIALIZED SUCCESSFULLY');
+    debugPrint('════════════════════════════════════════════════════');
+    debugPrint('⏳ Waiting for phone calls...\n');
   }
 
   // Handle call events
@@ -57,14 +58,14 @@ class CallController {
     final status = event.status;
     final number = event.number ?? 'Unknown';
 
-    print('\n⚡ HANDLING CALL EVENT');
-    print('   Status Type: $status');
-    print('   Phone Number: $number');
+    debugPrint('\n⚡ HANDLING CALL EVENT');
+    debugPrint('   Status Type: $status');
+    debugPrint('   Phone Number: $number');
 
     // Call started (incoming or outgoing)
     if (status == PhoneStateStatus.CALL_STARTED) {
-      print('\n🔴 ▶️ CALL STARTED!');
-      print('   → Phone number: $number');
+      debugPrint('\n🔴 ▶️ CALL STARTED!');
+      debugPrint('   → Phone number: $number');
 
       try {
         final callStartedAt = DateTime.now();
@@ -77,33 +78,33 @@ class CallController {
         await _persistLastResolvedPhoneNumber(resolvedPhoneNumber);
         await _persistLastCallStartedAt(callStartedAt);
 
-        print('   → Notifying SessionManager...');
+        debugPrint('   → Notifying SessionManager...');
         sessionManager.onCallStart(number);
-        print('   ✅ SessionManager notified');
+        debugPrint('   ✅ SessionManager notified');
 
         customerCallStore.markCallStarted(
           resolvedPhoneNumber,
           startedAt: callStartedAt,
         );
 
-        print('   → Starting Android recording service...');
+        debugPrint('   → Starting Android recording service...');
         await ServiceStarter.startService();
-        print('   ✅ Recording service started');
+        debugPrint('   ✅ Recording service started');
       } catch (e) {
-        print('   ❌ Error: $e');
+        debugPrint('   ❌ Error: $e');
       }
     }
     // Call ended
     else if (status == PhoneStateStatus.CALL_ENDED) {
-      print('\n🟢 ⏹️ CALL ENDED!');
-      print('   → Phone number: $number');
+      debugPrint('\n🟢 ⏹️ CALL ENDED!');
+      debugPrint('   → Phone number: $number');
 
       try {
         final callEndTime = DateTime.now();
 
-        print('   → Notifying SessionManager...');
+        debugPrint('   → Notifying SessionManager...');
         sessionManager.onCallEnd();
-        print('   ✅ SessionManager notified');
+        debugPrint('   ✅ SessionManager notified');
 
         final lookupPhoneNumber =
             customerCallStore.phoneNumberForCurrentCall(event.number) ??
@@ -113,7 +114,7 @@ class CallController {
             _lastCallStartedAt ?? await _readPersistedCallStartedAt();
 
         if (lookupPhoneNumber == null || lookupPhoneNumber == 'Unknown') {
-          print(
+          debugPrint(
             '   ⚠️ No resolved phone number available for recording lookup',
           );
           return;
@@ -125,27 +126,27 @@ class CallController {
           callEndedAt: callEndTime,
         );
 
-        print('   → Scheduling recording lookup...');
+        debugPrint('   → Scheduling recording lookup...');
         _scheduleRecordingLookup(
           phoneNumber: lookupPhoneNumber,
           callStartedAt: callStartedAt,
           callEndTime: callEndTime,
         );
       } catch (e) {
-        print('   ❌ Error: $e');
+        debugPrint('   ❌ Error: $e');
       }
     } else {
-      print('\n❓ OTHER STATE: $status');
+      debugPrint('\n❓ OTHER STATE: $status');
     }
 
-    print('');
+    debugPrint('');
   }
 
   // Stop listening
   void dispose() {
-    print('\n🛑 Disposing CallController...');
+    debugPrint('\n🛑 Disposing CallController...');
     callManager.stopListening();
-    print('✅ CallController disposed\n');
+    debugPrint('✅ CallController disposed\n');
   }
 
   void _scheduleRecordingLookup({
@@ -182,10 +183,10 @@ class CallController {
         await _clearPersistedPhoneNumber();
         await _clearPersistedCallStartedAt();
 
-        print('   ✅ Recording found');
-        print('      File: ${recording.fileName}');
-        print('      Path: ${recording.filePath}');
-        print('      Modified: ${recording.lastModifiedTime}');
+        debugPrint('   ✅ Recording found');
+        debugPrint('      File: ${recording.fileName}');
+        debugPrint('      Path: ${recording.filePath}');
+        debugPrint('      Modified: ${recording.lastModifiedTime}');
         return;
       }
 
@@ -198,7 +199,7 @@ class CallController {
       _lastCallStartedAt = null;
       await _clearPersistedPhoneNumber();
       await _clearPersistedCallStartedAt();
-      print('   ⚠️ No recording found in the latest recorder files');
+      debugPrint('   ⚠️ No recording found in the latest recorder files');
     });
   }
 
@@ -207,13 +208,13 @@ class CallController {
     required String phoneNumber,
     required DateTime? callStartedAt,
   }) async {
-    print(
+    debugPrint(
       '   → Recording lookup attempt $attempt/$_recordingLookupAttempts for files near ${callStartedAt ?? "unknown time"} matching $phoneNumber',
     );
 
     final recordings = await ServiceStarter.findRecordingsForPhone(phoneNumber);
     if (recordings.isEmpty) {
-      print('   → No files matched $phoneNumber on this attempt');
+      debugPrint('   → No files matched $phoneNumber on this attempt');
       return null;
     }
 
@@ -222,11 +223,13 @@ class CallController {
       recordings,
     );
     if (recording == null) {
-      print('   → Files were found, but none matched the call time window');
+      debugPrint(
+        '   → Files were found, but none matched the call time window',
+      );
       return null;
     }
 
-    print('   → Time-matched file right now: ${recording.fileName}');
+    debugPrint('   → Time-matched file right now: ${recording.fileName}');
     return recording;
   }
 

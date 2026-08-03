@@ -22,15 +22,21 @@ class ErpNextCustomerFetchException implements Exception {
 }
 
 class ErpNextCustomerService implements DraftPaymentCustomerSource {
-  static const String baseUrl = 'https://accounting.autozonepro.org';
+  static const String defaultBaseUrl = 'https://accounting.autozonepro.org';
+  static const String _configuredBaseUrl = String.fromEnvironment(
+    'ERPNEXT_BASE_URL',
+    defaultValue: defaultBaseUrl,
+  );
   static const int _pageLength = 100;
   static const int _customerBatchSize = 50;
   static const Duration _requestTimeout = Duration(seconds: 20);
 
   final http.Client _client;
+  final String baseUrl;
 
-  ErpNextCustomerService({http.Client? client})
-    : _client = client ?? http.Client();
+  ErpNextCustomerService({http.Client? client, String? baseUrl})
+    : _client = client ?? http.Client(),
+      baseUrl = baseUrl ?? _configuredBaseUrl;
 
   @override
   Future<List<DraftPaymentCustomer>> fetchDraftPaymentCustomers(

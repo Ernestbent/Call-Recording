@@ -54,13 +54,14 @@ class _CustomBottomNavState extends State<CustomBottomNav> {
 
   Widget _buildItem({
     required String label,
-    required IconData iconData,
+    required String iconAsset,
     required int index,
     required BuildContext context,
   }) {
     final isActive = widget.currentIndex == index;
     final isHovered = _hoveredIndex == index;
     final isHighlighted = isActive || isHovered;
+    final colorScheme = Theme.of(context).colorScheme;
 
     return MouseRegion(
       onEnter: (_) => setState(() => _hoveredIndex = index),
@@ -80,17 +81,25 @@ class _CustomBottomNavState extends State<CustomBottomNav> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(
-                iconData,
-                size: 23,
-                color: isHighlighted ? AppColors.primary : AppColors.subtle,
+              Image.asset(
+                iconAsset,
+                width: 23,
+                height: 23,
+                color: isHighlighted
+                    ? AppColors.primary
+                    : colorScheme.onSurfaceVariant,
+                colorBlendMode: BlendMode.srcIn,
+                filterQuality: FilterQuality.high,
+                semanticLabel: label,
               ),
               const SizedBox(height: 5),
               Text(
                 label,
                 style: TextStyle(
                   fontSize: 10,
-                  color: isHighlighted ? AppColors.primary : AppColors.muted,
+                  color: isHighlighted
+                      ? AppColors.primary
+                      : colorScheme.onSurfaceVariant,
                   fontWeight: FontWeight.w400,
                 ),
               ),
@@ -103,6 +112,7 @@ class _CustomBottomNavState extends State<CustomBottomNav> {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
     return Container(
       padding: EdgeInsets.fromLTRB(
         10,
@@ -110,8 +120,8 @@ class _CustomBottomNavState extends State<CustomBottomNav> {
         10,
         10 + MediaQuery.paddingOf(context).bottom,
       ),
-      decoration: const BoxDecoration(
-        color: AppColors.surface,
+      decoration: BoxDecoration(
+        color: colorScheme.surface,
         boxShadow: AppShadows.navigation,
       ),
       child: Row(
@@ -119,33 +129,25 @@ class _CustomBottomNavState extends State<CustomBottomNav> {
         children: [
           _buildItem(
             label: "Home",
-            iconData: widget.currentIndex == 0
-                ? Icons.home_rounded
-                : Icons.home_outlined,
+            iconAsset: 'lib/images/home(1).png',
             index: 0,
             context: context,
           ),
           _buildItem(
             label: "Customers",
-            iconData: widget.currentIndex == 1
-                ? Icons.people_alt_rounded
-                : Icons.people_alt_outlined,
+            iconAsset: 'lib/images/people.png',
             index: 1,
             context: context,
           ),
           _buildItem(
             label: "Sessions",
-            iconData: widget.currentIndex == 2
-                ? Icons.view_timeline_rounded
-                : Icons.view_timeline_outlined,
+            iconAsset: 'lib/images/hamburger.png',
             index: 2,
             context: context,
           ),
           _buildItem(
             label: "Settings",
-            iconData: widget.currentIndex == 3
-                ? Icons.settings_rounded
-                : Icons.settings_outlined,
+            iconAsset: 'lib/images/settings(1).png',
             index: 3,
             context: context,
           ),

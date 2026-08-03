@@ -133,7 +133,11 @@ class _SessionsScreenState extends State<SessionsScreen> {
             .map((customer) {
               final startedAt = customer.lastCallStartedAt;
               final endedAt = customer.lastCallEndedAt;
-              final status = customer.latestRecording != null
+              final latestRecording = customer.latestRecording;
+              final status =
+                  latestRecording != null &&
+                      widget.appState.recordingUploadState(latestRecording) ==
+                          RecordingUploadState.uploaded
                   ? _SessionStatus.uploaded
                   : _SessionStatus.pending;
 

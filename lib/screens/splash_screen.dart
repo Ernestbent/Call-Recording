@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:calls_recording/models/erpnext_session.dart';
 import 'package:calls_recording/screens/home_screen.dart';
 import 'package:calls_recording/screens/login_screen.dart';
+import 'package:calls_recording/services/agent_credential_service.dart';
 import 'package:calls_recording/services/customer_call_store.dart';
 import 'package:calls_recording/services/erpnext_auth_service.dart';
 import 'package:calls_recording/services/secure_session_storage.dart';
@@ -13,12 +14,14 @@ class SplashScreen extends StatefulWidget {
   final CustomerCallStore appState;
   final ErpNextAuthenticator? erpNextAuthenticator;
   final SessionStorage? sessionStorage;
+  final AgentCredentialManager? credentialManager;
 
   const SplashScreen({
     super.key,
     required this.appState,
     this.erpNextAuthenticator,
     this.sessionStorage,
+    this.credentialManager,
   });
 
   @override
@@ -31,6 +34,7 @@ class _SplashScreenState extends State<SplashScreen>
   late final Animation<double> _imageScale;
   late final ErpNextAuthenticator _erpNextAuthenticator;
   late final SessionStorage _sessionStorage;
+  late final AgentCredentialManager _credentialManager;
   late final Future<ErpNextSession?> _savedSession;
   Timer? _navigationTimer;
 
@@ -39,6 +43,8 @@ class _SplashScreenState extends State<SplashScreen>
     super.initState();
     _erpNextAuthenticator = widget.erpNextAuthenticator ?? ErpNextAuthService();
     _sessionStorage = widget.sessionStorage ?? SecureSessionStorage();
+    _credentialManager =
+        widget.credentialManager ?? SecureAgentCredentialManager();
     _savedSession = _readValidSavedSession();
     _controller = AnimationController(
       vsync: this,
@@ -55,15 +61,31 @@ class _SplashScreenState extends State<SplashScreen>
   Future<ErpNextSession?> _readValidSavedSession() async {
     try {
       final session = await _sessionStorage.read();
-      if (session == null) return null;
+      if (session == null) {
+        await _credentialManager.clear();
+        return null;
+      }
 
       final isValid = await _erpNextAuthenticator.isSessionValid(session);
       if (!isValid) {
         await _sessionStorage.clear();
+        await _credentialManager.clear();
         return null;
+      }
+
+      final activeCredentials = await _credentialManager.read();
+      if (activeCredentials == null ||
+          !activeCredentials.belongsTo(session.userId)) {
+        await _credentialManager.activateForEmail(session.userId);
       }
       return session;
     } catch (_) {
+      try {
+        await _sessionStorage.clear();
+        await _credentialManager.clear();
+      } catch (_) {
+        // The login screen remains the safe fallback.
+      }
       return null;
     }
   }
@@ -84,6 +106,7 @@ class _SplashScreenState extends State<SplashScreen>
                 appState: widget.appState,
                 erpNextAuthenticator: _erpNextAuthenticator,
                 sessionStorage: _sessionStorage,
+                credentialManager: _credentialManager,
               ),
         transitionsBuilder: (_, animation, secondaryAnimation, child) {
           final fade = CurvedAnimation(

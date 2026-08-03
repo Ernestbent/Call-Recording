@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+  import 'package:flutter/material.dart';
 
 abstract final class AppColors {
   static const Color primary = Color(0xFFE17C0F);
@@ -147,6 +147,104 @@ abstract final class AppTheme {
       ),
     );
   }
+
+  static ThemeData get dark {
+    const darkCanvas = Color(0xFF12100F);
+    const darkSurface = Color(0xFF1D1A18);
+    const darkSurfaceMuted = Color(0xFF292522);
+    const darkBorder = Color(0xFF403A35);
+    const darkInk = Color(0xFFF7F2ED);
+    const darkMuted = Color(0xFFC8BFB7);
+
+    final colorScheme = ColorScheme.fromSeed(
+      seedColor: AppColors.primary,
+      brightness: Brightness.dark,
+      primary: AppColors.primary,
+      surface: darkSurface,
+      surfaceContainerHighest: darkSurfaceMuted,
+      outline: darkBorder,
+    );
+
+    return ThemeData(
+      useMaterial3: true,
+      brightness: Brightness.dark,
+      colorScheme: colorScheme,
+      scaffoldBackgroundColor: darkCanvas,
+      fontFamily: 'Bubblegum Sans',
+      splashFactory: InkSparkle.splashFactory,
+      appBarTheme: const AppBarTheme(
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        backgroundColor: darkSurface,
+        surfaceTintColor: Colors.transparent,
+        foregroundColor: darkInk,
+        centerTitle: true,
+        toolbarHeight: 72,
+        shape: Border(bottom: BorderSide(color: darkBorder, width: 1)),
+        titleTextStyle: TextStyle(
+          color: darkInk,
+          fontFamily: 'Bubblegum Sans',
+          fontSize: 21,
+          fontWeight: FontWeight.w400,
+          letterSpacing: -0.4,
+        ),
+      ),
+      cardTheme: CardThemeData(
+        color: darkSurface,
+        elevation: 0,
+        margin: EdgeInsets.zero,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+      ),
+      filledButtonTheme: FilledButtonThemeData(
+        style: FilledButton.styleFrom(
+          backgroundColor: AppColors.primary,
+          foregroundColor: Colors.white,
+          disabledBackgroundColor: darkBorder,
+          disabledForegroundColor: darkMuted,
+          elevation: 0,
+          minimumSize: const Size(0, 50),
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 13),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          textStyle: const TextStyle(
+            fontFamily: 'Bubblegum Sans',
+            fontSize: 14,
+            fontWeight: FontWeight.w400,
+          ),
+        ),
+      ),
+      inputDecorationTheme: InputDecorationTheme(
+        filled: true,
+        fillColor: darkSurfaceMuted,
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 16,
+          vertical: 16,
+        ),
+        hintStyle: const TextStyle(color: darkMuted, fontSize: 14),
+        prefixIconColor: darkMuted,
+        suffixIconColor: darkMuted,
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: BorderSide.none,
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: AppColors.primary, width: 1.5),
+        ),
+      ),
+      dividerColor: darkBorder,
+      snackBarTheme: SnackBarThemeData(
+        backgroundColor: darkSurfaceMuted,
+        contentTextStyle: const TextStyle(
+          color: darkInk,
+          fontFamily: 'Bubblegum Sans',
+        ),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      ),
+    );
+  }
 }
 
 class SectionLabel extends StatelessWidget {
@@ -162,8 +260,8 @@ class SectionLabel extends StatelessWidget {
         Expanded(
           child: Text(
             text.toUpperCase(),
-            style: const TextStyle(
-              color: AppColors.muted,
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
               fontSize: 11,
               fontWeight: FontWeight.w400,
               letterSpacing: 1.2,
