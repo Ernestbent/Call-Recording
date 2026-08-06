@@ -1,6 +1,8 @@
 import 'package:calls_recording/services/customer_call_store.dart';
+import 'package:calls_recording/db/call_model.dart';
 import 'package:calls_recording/models/customer_contact.dart';
 import 'package:calls_recording/repository/call_repository.dart';
+import 'package:calls_recording/services/recording_upload_service.dart';
 import 'package:calls_recording/services/service_starter.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -62,8 +64,10 @@ void main() {
 
     SharedPreferences.setMockInitialValues({});
     final persistence = _FakeCallPersistence();
+    final uploader = _FakeRecordingUploader();
     final store = CustomerCallStore(
       callPersistence: persistence,
+      recordingUploader: uploader,
       initialCustomers: const [
         CustomerContact(
           name: 'Othieno Benedict Ernest',
@@ -93,20 +97,29 @@ void main() {
       ),
       isNot(contains('/recordings/unrelated.m4a')),
     );
-    expect(persistence.savedCalls, hasLength(1));
+    expect(persistence.savedCalls, hasLength(2));
     expect(
-      persistence.savedCalls.single['audio_path'],
+      persistence.savedCalls.first['audio_path'],
       '/recordings/closest.m4a',
     );
-    expect(persistence.savedCalls.single['phone_number'], '+256 772545948');
-    expect(persistence.savedCalls.single['status'], 'pending');
+    expect(persistence.savedCalls.first['phone_number'], '+256 772545948');
+    expect(
+      persistence.savedCalls.every((call) => call['status'] == 'uploaded'),
+      isTrue,
+    );
+    expect(uploader.uploadedCalls, hasLength(2));
+    final savedSessionIds = persistence.savedCalls
+        .map((call) => call['session_id'])
+        .toSet();
 
     await store.fetchRecordingsForAllCustomers();
 
+    expect(persistence.savedCalls, hasLength(2));
     expect(
-      persistence.savedCalls.last['session_id'],
-      persistence.savedCalls.first['session_id'],
+      persistence.savedCalls.map((call) => call['session_id']).toSet(),
+      savedSessionIds,
     );
+    expect(uploader.uploadedCalls, hasLength(2));
 
     final recording = store.customers.first.availableRecordings.last;
     final didStart = await store.playRecording(recording);
@@ -126,6 +139,25 @@ void main() {
     expect(didResume, isTrue);
     expect(store.isPlayingRecording(recording), isTrue);
   });
+}
+
+class _FakeRecordingUploader implements RecordingUploader {
+  final List<CallModel> uploadedCalls = [];
+
+  @override
+  bool get isConfigured => true;
+
+  @override
+  Future<RecordingUploadResult> upload({
+    required CallModel call,
+    String? customerId,
+  }) async {
+    uploadedCalls.add(call);
+    return RecordingUploadResult(
+      uploadId: '${uploadedCalls.length}',
+      message: 'Uploaded.',
+    );
+  }
 }
 
 class _FakeCallPersistence implements CallPersistence {

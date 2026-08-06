@@ -57,7 +57,9 @@ class CustomersScreen extends StatelessWidget {
         child: AnimatedBuilder(
           animation: appState,
           builder: (context, _) {
-            final customers = appState.customers;
+            final customers = appState.customersToCall;
+            final hasCompletedCalls =
+                appState.customers.length > customers.length;
 
             Widget buildCustomerCard(CustomerContact customer) {
               return _CustomerCard(
@@ -107,9 +109,7 @@ class CustomersScreen extends StatelessWidget {
                     _CustomerLoadError(message: appState.customerLoadError!),
                     const SizedBox(height: 14),
                   ],
-                  _SummaryCard(
-                    recordingsReadyCount: appState.recordingsReadyCount,
-                  ),
+                  _SummaryCard(customersToCallCount: customers.length),
                   const SizedBox(height: 14),
                   SizedBox(
                     width: double.infinity,
@@ -152,8 +152,8 @@ class CustomersScreen extends StatelessWidget {
                       ),
                       label: Text(
                         appState.isFetchingAllRecordings
-                            ? 'Fetching recordings...'
-                            : 'Fetch All Recordings',
+                            ? 'Scanning recordings...'
+                            : 'Rescan Recordings',
                         style: const TextStyle(
                           fontFamily: 'Bubblegum Sans',
                           fontWeight: FontWeight.w400,
@@ -161,6 +161,43 @@ class CustomersScreen extends StatelessWidget {
                       ),
                     ),
                   ),
+                  if (appState.canImportTestRecording) ...[
+                    const SizedBox(height: 10),
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        key: const Key('import-test-recording-button'),
+                        onPressed:
+                            appState.isFetchingAllRecordings ||
+                                appState.isUploadingAllRecordings
+                            ? null
+                            : () async {
+                                final imported = await appState
+                                    .importLatestSavedRecordingForTest();
+                                if (!context.mounted) return;
+
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text(
+                                      imported
+                                          ? 'Loaded one saved recording for ${appState.testRecordingPhoneNumber}. It is ready to upload.'
+                                          : appState.lastRecordingUploadError ??
+                                                'No matching test recording was found.',
+                                    ),
+                                  ),
+                                );
+                              },
+                        icon: const Icon(Icons.science_rounded, size: 18),
+                        label: Text(
+                          'Load Test Recording (${appState.testRecordingPhoneNumber})',
+                          style: const TextStyle(
+                            fontFamily: 'Bubblegum Sans',
+                            fontWeight: FontWeight.w400,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 10),
                   SizedBox(
                     width: double.infinity,
@@ -169,7 +206,8 @@ class CustomersScreen extends StatelessWidget {
                       onPressed:
                           appState.isUploadingAllRecordings ||
                               appState.isFetchingAllRecordings ||
-                              appState.matchedRecordingsCount == 0
+                              appState.matchedRecordingsCount == 0 ||
+                              appState.pendingRecordingUploadsCount == 0
                           ? null
                           : () async {
                               final result = await appState
@@ -214,8 +252,8 @@ class CustomersScreen extends StatelessWidget {
                             ? 'Uploading all recordings...'
                             : appState.pendingRecordingUploadsCount == 0 &&
                                   appState.matchedRecordingsCount > 0
-                            ? 'All Recordings Uploaded'
-                            : 'Upload All Recordings (${appState.pendingRecordingUploadsCount})',
+                            ? 'No Pending Uploads'
+                            : 'Retry Pending Uploads (${appState.pendingRecordingUploadsCount})',
                         style: const TextStyle(
                           fontFamily: 'Bubblegum Sans',
                           fontWeight: FontWeight.w400,
@@ -243,7 +281,11 @@ class CustomersScreen extends StatelessWidget {
             List<Widget> buildCustomerSlivers() {
               return [
                 if (customers.isEmpty)
-                  const SliverToBoxAdapter(child: _EmptyCustomersState())
+                  SliverToBoxAdapter(
+                    child: _EmptyCustomersState(
+                      hasCompletedCalls: hasCompletedCalls,
+                    ),
+                  )
                 else
                   SliverList(
                     delegate: SliverChildBuilderDelegate((context, index) {
@@ -297,7 +339,9 @@ class CustomersScreen extends StatelessWidget {
 }
 
 class _EmptyCustomersState extends StatelessWidget {
-  const _EmptyCustomersState();
+  final bool hasCompletedCalls;
+
+  const _EmptyCustomersState({required this.hasCompletedCalls});
 
   @override
   Widget build(BuildContext context) {
@@ -305,14 +349,20 @@ class _EmptyCustomersState extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.all(20),
       decoration: AppSurfaces.placeholder(radius: 16),
-      child: const Row(
+      child: Row(
         children: [
-          Icon(Icons.people_outline_rounded, color: AppColors.subtle, size: 22),
-          SizedBox(width: 13),
+          const Icon(
+            Icons.people_outline_rounded,
+            color: AppColors.subtle,
+            size: 22,
+          ),
+          const SizedBox(width: 13),
           Expanded(
             child: Text(
-              'No customers with draft Payment Entries and a mobile number were found.',
-              style: TextStyle(
+              hasCompletedCalls
+                  ? 'No customers are waiting for a call. Uploaded calls remain available in Recent Activity.'
+                  : 'No customers with draft Payment Entries and a mobile number were found.',
+              style: const TextStyle(
                 color: AppColors.muted,
                 fontSize: 13,
                 height: 1.4,
@@ -360,9 +410,9 @@ class _CustomerLoadError extends StatelessWidget {
 }
 
 class _SummaryCard extends StatelessWidget {
-  final int recordingsReadyCount;
+  final int customersToCallCount;
 
-  const _SummaryCard({required this.recordingsReadyCount});
+  const _SummaryCard({required this.customersToCallCount});
 
   @override
   Widget build(BuildContext context) {
@@ -381,7 +431,7 @@ class _SummaryCard extends StatelessWidget {
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   const Text(
-                    'RECORDINGS AVAILABLE',
+                    'CUSTOMERS TO CALL',
                     style: TextStyle(
                       color: AppColors.primaryDark,
                       fontSize: 11,
@@ -391,7 +441,7 @@ class _SummaryCard extends StatelessWidget {
                   ),
                   const SizedBox(height: 10),
                   Text(
-                    '$recordingsReadyCount',
+                    '$customersToCallCount',
                     style: const TextStyle(
                       color: AppColors.ink,
                       fontSize: 42,
@@ -402,7 +452,7 @@ class _SummaryCard extends StatelessWidget {
                   ),
                   const SizedBox(height: 8),
                   const Text(
-                    'Customers ready to review',
+                    'Draft-payment customers waiting',
                     style: TextStyle(
                       color: AppColors.muted,
                       fontSize: 12,
