@@ -1,13 +1,15 @@
+import 'dart:async';
+
 import 'package:calls_recording/models/call_recording_file.dart';
 import 'package:calls_recording/services/call_manager.dart';
 import 'package:calls_recording/services/customer_call_store.dart';
 import 'package:calls_recording/services/session_manager.dart';
 import 'package:calls_recording/services/service_starter.dart';
-import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 import 'package:phone_state/phone_state.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-class CallController {
+class CallController with WidgetsBindingObserver {
   static const int _recordingLookupAttempts = 12;
   static const Duration _recordingLookupInitialDelay = Duration(seconds: 4);
   static const Duration _recordingLookupRetryDelay = Duration(seconds: 8);
@@ -19,6 +21,7 @@ class CallController {
   final CustomerCallStore customerCallStore;
   String? _lastResolvedPhoneNumber;
   DateTime? _lastCallStartedAt;
+  bool _isObservingLifecycle = false;
 
   CallController({
     required this.callManager,
@@ -41,6 +44,10 @@ class CallController {
       debugPrint('════════════════════════════════════════════════════\n');
       return;
     }
+
+    await ServiceStarter.startService();
+    WidgetsBinding.instance.addObserver(this);
+    _isObservingLifecycle = true;
 
     // Start listening
     debugPrint('\nStep 2: Starting phone state listener...');
@@ -86,10 +93,6 @@ class CallController {
           resolvedPhoneNumber,
           startedAt: callStartedAt,
         );
-
-        debugPrint('   → Starting Android recording service...');
-        await ServiceStarter.startService();
-        debugPrint('   ✅ Recording service started');
       } catch (e) {
         debugPrint('   ❌ Error: $e');
       }
@@ -146,7 +149,18 @@ class CallController {
   void dispose() {
     debugPrint('\n🛑 Disposing CallController...');
     callManager.stopListening();
+    if (_isObservingLifecycle) {
+      WidgetsBinding.instance.removeObserver(this);
+      _isObservingLifecycle = false;
+    }
     debugPrint('✅ CallController disposed\n');
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(customerCallStore.reconcileCompletedBackgroundCalls());
+    }
   }
 
   void _scheduleRecordingLookup({

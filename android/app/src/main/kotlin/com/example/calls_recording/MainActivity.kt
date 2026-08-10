@@ -61,6 +61,9 @@ class MainActivity : FlutterActivity() {
 
                         result.success("Service Stopped")
                     }
+                    "consumeCompletedCalls" -> {
+                        result.success(CallRecorderService.consumeCompletedCalls(this))
+                    }
                     "findRecentCallRecording" -> {
                         val callEndTimeMillis = call.argument<Number>("callEndTimeMillis")?.toLong()
                         val windowSeconds = call.argument<Number>("windowSeconds")?.toLong() ?: 60L

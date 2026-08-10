@@ -2,6 +2,51 @@ import 'package:calls_recording/models/call_recording_file.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
+class CompletedBackgroundCall {
+  final String id;
+  final String? phoneNumber;
+  final DateTime startedAt;
+  final DateTime endedAt;
+  final CallRecordingFile? recording;
+
+  const CompletedBackgroundCall({
+    required this.id,
+    required this.phoneNumber,
+    required this.startedAt,
+    required this.endedAt,
+    required this.recording,
+  });
+
+  factory CompletedBackgroundCall.fromMap(Map<dynamic, dynamic> map) {
+    final startedAtMillis = (map['startedAtMillis'] as num).toInt();
+    final endedAtMillis = (map['endedAtMillis'] as num).toInt();
+    final recordingPath = map['recordingPath']?.toString();
+    final recordingName = map['recordingName']?.toString();
+    final modifiedAtMillis = map['recordingModifiedAtMillis'] as num?;
+
+    return CompletedBackgroundCall(
+      id: map['id']?.toString() ?? '$startedAtMillis-$endedAtMillis',
+      phoneNumber: map['phoneNumber']?.toString(),
+      startedAt: DateTime.fromMillisecondsSinceEpoch(startedAtMillis),
+      endedAt: DateTime.fromMillisecondsSinceEpoch(endedAtMillis),
+      recording:
+          recordingPath == null ||
+              recordingPath.isEmpty ||
+              recordingName == null ||
+              recordingName.isEmpty ||
+              modifiedAtMillis == null
+          ? null
+          : CallRecordingFile(
+              filePath: recordingPath,
+              fileName: recordingName,
+              lastModifiedTime: DateTime.fromMillisecondsSinceEpoch(
+                modifiedAtMillis.toInt(),
+              ),
+            ),
+    );
+  }
+}
+
 class ServiceStarter {
   static const platform = MethodChannel('call_recorder_service');
   static void Function(String filePath)? _onPlaybackCompleted;
@@ -42,6 +87,23 @@ class ServiceStarter {
       await platform.invokeMethod('stopService');
     } catch (e) {
       debugPrint('Failed to stop service: $e');
+    }
+  }
+
+  static Future<List<CompletedBackgroundCall>> consumeCompletedCalls() async {
+    try {
+      final result = await platform.invokeListMethod<dynamic>(
+        'consumeCompletedCalls',
+      );
+      if (result == null) return const [];
+
+      return result
+          .whereType<Map<dynamic, dynamic>>()
+          .map(CompletedBackgroundCall.fromMap)
+          .toList(growable: false);
+    } catch (e) {
+      debugPrint('Failed to read completed background calls: $e');
+      return const [];
     }
   }
 

@@ -212,7 +212,8 @@ void main() {
             name: 'Customer ${index + 1}',
             phoneNumber: '07000000$index',
             subtitle: '1 draft payment entry',
-            statusLabel: 'Ready to call',
+            statusLabel: '2 recordings ready; upload pending',
+            matchingRecordingsCount: 2,
           ),
         ),
       );
@@ -284,6 +285,8 @@ void main() {
         findsOneWidget,
       );
       expect(find.text('No call has been started from this app'), findsNothing);
+      expect(find.text('2 recordings ready; upload pending'), findsNothing);
+      expect(find.text('2 recordings ready to play'), findsNothing);
 
       await tester.ensureVisible(
         find.byKey(const Key('customer-avatar-0700000099')),

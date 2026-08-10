@@ -55,6 +55,58 @@ void main() {
       expect(store.customersToCall, isEmpty);
     },
   );
+
+  test('duplicate completion events upload only one recording', () async {
+    SharedPreferences.setMockInitialValues({});
+    final persistence = _FakeCallPersistence();
+    final uploader = _FakeRecordingUploader();
+    final store = CustomerCallStore(
+      callPersistence: persistence,
+      recordingUploader: uploader,
+      initialCustomers: const [
+        CustomerContact(
+          erpNextCustomerId: 'CUST-TEST-001',
+          name: 'Test Customer',
+          phoneNumber: '0772835195',
+          subtitle: '1 draft payment entry',
+          statusLabel: 'Ready to call',
+        ),
+      ],
+    );
+    final startedAt = DateTime(2026, 8, 3, 12);
+    final endedAt = startedAt.add(const Duration(seconds: 45));
+    final serviceRecording = CallRecordingFile(
+      filePath: '/recordings/service-call.m4a',
+      fileName: 'service-call.m4a',
+      lastModifiedTime: endedAt,
+    );
+    final dialerRecording = CallRecordingFile(
+      filePath: '/recordings/dialer-call.m4a',
+      fileName: 'dialer-call.m4a',
+      lastModifiedTime: endedAt.add(const Duration(seconds: 1)),
+    );
+
+    store.markCallStarted('0772835195', startedAt: startedAt);
+    await store.markCallCompleted(
+      phoneNumber: '0772835195',
+      callEndedAt: endedAt,
+      recording: serviceRecording,
+    );
+    store.markCallStarted(
+      '0772835195',
+      startedAt: startedAt.add(const Duration(seconds: 1)),
+    );
+    await store.markCallCompleted(
+      phoneNumber: '0772835195',
+      callEndedAt: endedAt.add(const Duration(seconds: 1)),
+      recording: dialerRecording,
+    );
+
+    expect(uploader.uploadedCalls, hasLength(1));
+    expect(persistence.savedCalls, hasLength(1));
+    expect(store.customers.single.availableRecordings, [serviceRecording]);
+    expect(store.customers.single.matchingRecordingsCount, 1);
+  });
 }
 
 class _FakeRecordingUploader implements RecordingUploader {

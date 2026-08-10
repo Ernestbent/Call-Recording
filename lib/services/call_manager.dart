@@ -21,6 +21,14 @@ class CallManager {
       final micStatus = await Permission.microphone.request();
       debugPrint('   Mic: ${micStatus.isGranted ? "✅ GRANTED" : "❌ DENIED"}');
 
+      if (Platform.isAndroid) {
+        debugPrint('📱 Requesting Notification permission...');
+        final notificationStatus = await Permission.notification.request();
+        debugPrint(
+          '   Notifications: ${notificationStatus.isGranted ? "✅ GRANTED" : "❌ DENIED"}',
+        );
+      }
+
       debugPrint('📱 Requesting Storage permission...');
       final storageStatus = await Permission.storage.request();
       debugPrint(

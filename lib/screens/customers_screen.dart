@@ -180,7 +180,10 @@ class CustomersScreen extends StatelessWidget {
                                   SnackBar(
                                     content: Text(
                                       imported
-                                          ? 'Loaded one saved recording for ${appState.testRecordingPhoneNumber}. It is ready to upload.'
+                                          ? appState.lastRecordingUploadError ==
+                                                    null
+                                                ? 'Loaded and uploaded one saved recording for ${appState.testRecordingPhoneNumber}.'
+                                                : 'Loaded one saved recording for ${appState.testRecordingPhoneNumber}. Automatic upload will retry.'
                                           : appState.lastRecordingUploadError ??
                                                 'No matching test recording was found.',
                                     ),
@@ -554,17 +557,6 @@ class _CustomerCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 10),
-          if (customer.matchingRecordingsCount > 0)
-            Text(
-              customer.matchingRecordingsCount == 1
-                  ? '1 recording ready to play'
-                  : '${customer.matchingRecordingsCount} recordings ready to play',
-              style: const TextStyle(
-                fontFamily: 'Bubblegum Sans',
-                fontSize: 12,
-                color: AppColors.muted,
-              ),
-            ),
           if (customer.latestPaymentEntryCreatedAt != null) ...[
             const SizedBox(height: 10),
             Text(
@@ -580,7 +572,12 @@ class _CustomerCard extends StatelessWidget {
               ),
             ),
           ],
-          if (customer.statusLabel != 'Ready to call') ...[
+          if (customer.statusLabel != 'Ready to call' &&
+              !customer.statusLabel.toLowerCase().contains('upload pending') &&
+              !customer.statusLabel.toLowerCase().contains('recording ready') &&
+              !customer.statusLabel.toLowerCase().contains(
+                'recordings ready',
+              )) ...[
             const SizedBox(height: 14),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),

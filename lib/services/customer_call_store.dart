@@ -32,6 +32,7 @@ class RecordingBatchUploadResult {
 class CustomerCallStore extends ChangeNotifier {
   static const Duration _recordingWindowStartOffset = Duration(seconds: 30);
   static const Duration _recordingWindowDuration = Duration(minutes: 2);
+  static const Duration _duplicateCallTolerance = Duration(seconds: 15);
   static const String _erpNextBaseUrl = String.fromEnvironment(
     'ERPNEXT_BASE_URL',
     defaultValue: 'http://127.0.0.1:8082',
@@ -311,6 +312,7 @@ class CustomerCallStore extends ChangeNotifier {
       _customers
         ..clear()
         ..addAll(refreshedCustomers);
+      await reconcileCompletedBackgroundCalls();
       _scheduleAutomaticRecordingFetch();
       return _customers.length;
     } on ErpNextCustomerFetchException catch (error) {
@@ -371,6 +373,23 @@ class CustomerCallStore extends ChangeNotifier {
     return didOpen;
   }
 
+  Future<void> reconcileCompletedBackgroundCalls() async {
+    if (_customers.isEmpty) return;
+
+    final completedCalls = await ServiceStarter.consumeCompletedCalls();
+    for (final completedCall in completedCalls) {
+      final phoneNumber = completedCall.phoneNumber;
+      if (phoneNumber == null || phoneNumber.trim().isEmpty) continue;
+
+      markCallStarted(phoneNumber, startedAt: completedCall.startedAt);
+      await markCallCompleted(
+        phoneNumber: phoneNumber,
+        callEndedAt: completedCall.endedAt,
+        recording: completedCall.recording,
+      );
+    }
+  }
+
   void markCallStarted(String? phoneNumber, {required DateTime startedAt}) {
     final resolvedNumber = _resolvePhoneNumber(phoneNumber);
     if (resolvedNumber == null) return;
@@ -395,6 +414,32 @@ class CustomerCallStore extends ChangeNotifier {
   }) async {
     final resolvedNumber = _resolvePhoneNumber(phoneNumber);
     if (resolvedNumber == null) return;
+
+    final existingCustomer = _customerForPhone(resolvedNumber);
+    final existingRecording = existingCustomer?.latestRecording;
+    if (recording != null &&
+        existingRecording != null &&
+        _timestampsAreClose(
+          existingCustomer?.lastCallEndedAt,
+          callEndedAt,
+          _duplicateCallTolerance,
+        )) {
+      _updateCustomer(
+        resolvedNumber,
+        (current) => current.copyWith(
+          statusLabel: switch (recordingUploadState(existingRecording)) {
+            RecordingUploadState.uploaded => 'Recording uploaded',
+            RecordingUploadState.uploading => 'Uploading recording...',
+            _ => 'Recording saved; upload pending',
+          },
+          isCallQueued: false,
+          isCallInProgress: false,
+        ),
+      );
+      _queuedPhoneNumber = null;
+      _activePhoneNumber = null;
+      return;
+    }
 
     _updateCustomer(
       resolvedNumber,
@@ -540,21 +585,19 @@ class CustomerCallStore extends ChangeNotifier {
         var uploadFailed = false;
         if (latestRecording != null) {
           matchedCustomers++;
-          for (final recording in matchingRecordings) {
-            final call = await _saveMatchedRecording(
+          final call = await _saveMatchedRecording(
+            customer: currentCustomer,
+            recording: latestRecording,
+          );
+          if (call != null &&
+              recordingUploadState(latestRecording) !=
+                  RecordingUploadState.uploaded) {
+            final uploaded = await _uploadMatchedRecording(
               customer: currentCustomer,
-              recording: recording,
+              recording: latestRecording,
+              call: call,
             );
-            if (call != null &&
-                recordingUploadState(recording) !=
-                    RecordingUploadState.uploaded) {
-              final uploaded = await _uploadMatchedRecording(
-                customer: currentCustomer,
-                recording: recording,
-                call: call,
-              );
-              uploadFailed = uploadFailed || !uploaded;
-            }
+            uploadFailed = !uploaded;
           }
         }
 
@@ -566,11 +609,13 @@ class CustomerCallStore extends ChangeNotifier {
                       ? 'Ready to call'
                       : 'No recordings matched the last app call'
                 : uploadFailed
-                ? '${matchingRecordings.length} recording${matchingRecordings.length == 1 ? '' : 's'} ready; upload pending'
-                : '${matchingRecordings.length} recording${matchingRecordings.length == 1 ? '' : 's'} uploaded',
+                ? 'Recording saved; upload pending'
+                : 'Recording uploaded',
             latestRecording: latestRecording,
-            availableRecordings: matchingRecordings,
-            matchingRecordingsCount: matchingRecordings.length,
+            availableRecordings: latestRecording == null
+                ? const []
+                : [latestRecording],
+            matchingRecordingsCount: latestRecording == null ? 0 : 1,
             clearRecording: latestRecording == null,
             isCallQueued: false,
             isCallInProgress: false,
@@ -656,9 +701,26 @@ class CustomerCallStore extends ChangeNotifier {
       startedAt: startedAt,
       endedAt: endedAt,
     );
-    await _saveMatchedRecording(customer: customer, recording: recording);
-    _lastRecordingUploadError = null;
-    notifyListeners();
+    final call = await _saveMatchedRecording(
+      customer: customer,
+      recording: recording,
+    );
+    if (call != null &&
+        recordingUploadState(recording) != RecordingUploadState.uploaded) {
+      final uploaded = await _uploadMatchedRecording(
+        customer: customer,
+        recording: recording,
+        call: call,
+      );
+      _updateCustomer(
+        customer.phoneNumber,
+        (current) => current.copyWith(
+          statusLabel: uploaded
+              ? 'Recording uploaded'
+              : 'Recording saved; upload pending',
+        ),
+      );
+    }
     return true;
   }
 
@@ -793,11 +855,20 @@ class CustomerCallStore extends ChangeNotifier {
           return aDelta.compareTo(bDelta);
         });
 
-    return matches;
+    return matches.take(1).toList(growable: false);
   }
 
   bool _timestampInWindow(DateTime timestamp, DateTime start, DateTime end) {
     return !timestamp.isBefore(start) && timestamp.isBefore(end);
+  }
+
+  bool _timestampsAreClose(
+    DateTime? first,
+    DateTime second,
+    Duration tolerance,
+  ) {
+    if (first == null) return false;
+    return first.difference(second).abs() <= tolerance;
   }
 
   String? _resolvePhoneNumber(String? rawPhoneNumber) {
@@ -952,15 +1023,15 @@ class CustomerCallStore extends ChangeNotifier {
     final seenPaths = <String>{};
 
     for (final customer in _customers) {
-      final recordings = customer.availableRecordings.isEmpty
-          ? [if (customer.latestRecording != null) customer.latestRecording!]
-          : customer.availableRecordings;
-      for (final recording in recordings) {
-        if (seenPaths.add(recording.filePath)) {
-          targets.add(
-            _MatchedRecordingTarget(customer: customer, recording: recording),
-          );
-        }
+      final recording =
+          customer.latestRecording ??
+          (customer.availableRecordings.isEmpty
+              ? null
+              : customer.availableRecordings.first);
+      if (recording != null && seenPaths.add(recording.filePath)) {
+        targets.add(
+          _MatchedRecordingTarget(customer: customer, recording: recording),
+        );
       }
     }
 

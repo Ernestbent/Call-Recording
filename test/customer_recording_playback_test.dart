@@ -10,7 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  test('only recordings near an app-started call are retained', () async {
+  test('only the best recording for an app-started call is uploaded', () async {
     String? playedPath;
     final callStartedAt = DateTime(2026, 7, 24, 12, 0, 20);
     final closestRecordingAt = DateTime(2026, 7, 24, 12, 0, 25);
@@ -86,7 +86,7 @@ void main() {
     final matchedCustomers = await store.fetchRecordingsForAllCustomers();
 
     expect(matchedCustomers, 1);
-    expect(store.customers.first.availableRecordings, hasLength(2));
+    expect(store.customers.first.availableRecordings, hasLength(1));
     expect(
       store.customers.first.latestRecording?.filePath,
       '/recordings/closest.m4a',
@@ -97,7 +97,7 @@ void main() {
       ),
       isNot(contains('/recordings/unrelated.m4a')),
     );
-    expect(persistence.savedCalls, hasLength(2));
+    expect(persistence.savedCalls, hasLength(1));
     expect(
       persistence.savedCalls.first['audio_path'],
       '/recordings/closest.m4a',
@@ -107,25 +107,25 @@ void main() {
       persistence.savedCalls.every((call) => call['status'] == 'uploaded'),
       isTrue,
     );
-    expect(uploader.uploadedCalls, hasLength(2));
+    expect(uploader.uploadedCalls, hasLength(1));
     final savedSessionIds = persistence.savedCalls
         .map((call) => call['session_id'])
         .toSet();
 
     await store.fetchRecordingsForAllCustomers();
 
-    expect(persistence.savedCalls, hasLength(2));
+    expect(persistence.savedCalls, hasLength(1));
     expect(
       persistence.savedCalls.map((call) => call['session_id']).toSet(),
       savedSessionIds,
     );
-    expect(uploader.uploadedCalls, hasLength(2));
+    expect(uploader.uploadedCalls, hasLength(1));
 
-    final recording = store.customers.first.availableRecordings.last;
+    final recording = store.customers.first.availableRecordings.single;
     final didStart = await store.playRecording(recording);
 
     expect(didStart, isTrue);
-    expect(playedPath, '/recordings/second.m4a');
+    expect(playedPath, '/recordings/closest.m4a');
     expect(store.isPlayingRecording(recording), isTrue);
 
     final didPause = await store.playRecording(recording);
