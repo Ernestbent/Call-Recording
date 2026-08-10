@@ -11,7 +11,7 @@ void main() {
       expect(request.method, 'POST');
       expect(
         request.url,
-        Uri.parse('https://accounting.autozonepro.org/api/method/login'),
+        Uri.parse('http://127.0.0.1:8082/api/method/login'),
       );
       expect(jsonDecode(request.body), {
         'usr': 'agent@example.com',

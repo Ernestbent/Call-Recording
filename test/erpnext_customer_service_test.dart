@@ -29,9 +29,21 @@ void main() {
           return http.Response(
             jsonEncode({
               'data': [
-                {'name': 'PAY-1', 'party': 'CUST-A'},
-                {'name': 'PAY-2', 'party': 'CUST-A'},
-                {'name': 'PAY-3', 'party': 'CUST-B'},
+                {
+                  'name': 'PAY-1',
+                  'party': 'CUST-A',
+                  'creation': '2026-08-01 08:15:00',
+                },
+                {
+                  'name': 'PAY-2',
+                  'party': 'CUST-A',
+                  'creation': '2026-08-03 10:30:00',
+                },
+                {
+                  'name': 'PAY-3',
+                  'party': 'CUST-B',
+                  'creation': '2026-08-02 09:00:00',
+                },
               ],
             }),
             200,
@@ -68,6 +80,11 @@ void main() {
       isTrue,
     );
     expect(requests.first.url.path, '/api/resource/Payment%20Entry');
+    expect(jsonDecode(requests.first.url.queryParameters['fields']!), [
+      'name',
+      'party',
+      'creation',
+    ]);
     expect(jsonDecode(requests.first.url.queryParameters['filters']!), [
       ['docstatus', '=', 0],
       ['party_type', '=', 'Customer'],
@@ -86,8 +103,12 @@ void main() {
     expect(customers.single.phoneNumber, '0755962582');
     expect(customers.single.draftPaymentCount, 2);
     expect(
+      customers.single.latestPaymentEntryCreatedAt,
+      DateTime(2026, 8, 3, 10, 30),
+    );
+    expect(
       customers.single.imageUrl,
-      'https://accounting.autozonepro.org/private/files/alpha.jpg',
+      'http://127.0.0.1:8082/private/files/alpha.jpg',
     );
   });
 
@@ -104,6 +125,10 @@ void main() {
       expect(count, 1);
       expect(store.customers.single.erpNextCustomerId, 'CUST-A');
       expect(store.customers.single.subtitle, '2 draft payment entries');
+      expect(
+        store.customers.single.latestPaymentEntryCreatedAt,
+        DateTime(2026, 8, 3, 10, 30),
+      );
       expect(store.customers.single.profileImageHeaders, {
         'Cookie': 'sid=saved-sid',
       });
@@ -133,13 +158,14 @@ class _FakeDraftPaymentCustomerSource implements DraftPaymentCustomerSource {
   Future<List<DraftPaymentCustomer>> fetchDraftPaymentCustomers(
     ErpNextSession session,
   ) async {
-    return const [
+    return [
       DraftPaymentCustomer(
         customerId: 'CUST-A',
         customerName: 'Alpha Motors',
         phoneNumber: '+256700000001',
-        imageUrl: 'https://accounting.autozonepro.org/private/files/alpha.jpg',
+        imageUrl: 'http://127.0.0.1:8082/private/files/alpha.jpg',
         draftPaymentCount: 2,
+        latestPaymentEntryCreatedAt: DateTime(2026, 8, 3, 10, 30),
       ),
     ];
   }

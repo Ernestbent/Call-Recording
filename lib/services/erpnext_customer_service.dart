@@ -22,7 +22,7 @@ class ErpNextCustomerFetchException implements Exception {
 }
 
 class ErpNextCustomerService implements DraftPaymentCustomerSource {
-  static const String defaultBaseUrl = 'https://accounting.autozonepro.org';
+  static const String defaultBaseUrl = 'http://127.0.0.1:8082';
   static const String _configuredBaseUrl = String.fromEnvironment(
     'ERPNEXT_BASE_URL',
     defaultValue: defaultBaseUrl,
@@ -43,11 +43,11 @@ class ErpNextCustomerService implements DraftPaymentCustomerSource {
     ErpNextSession session,
   ) async {
     try {
-      final draftCounts = await _fetchDraftPaymentCustomerCounts(session);
-      if (draftCounts.isEmpty) return const [];
+      final draftPayments = await _fetchDraftPaymentSummaries(session);
+      if (draftPayments.isEmpty) return const [];
 
       final customers = <DraftPaymentCustomer>[];
-      final customerIds = draftCounts.keys.toList(growable: false);
+      final customerIds = draftPayments.keys.toList(growable: false);
 
       for (
         var start = 0;
@@ -60,7 +60,7 @@ class ErpNextCustomerService implements DraftPaymentCustomerSource {
           await _fetchCustomerBatch(
             session: session,
             customerIds: batch,
-            draftCounts: draftCounts,
+            draftPayments: draftPayments,
           ),
         );
       }
@@ -88,16 +88,16 @@ class ErpNextCustomerService implements DraftPaymentCustomerSource {
     }
   }
 
-  Future<Map<String, int>> _fetchDraftPaymentCustomerCounts(
+  Future<Map<String, _DraftPaymentSummary>> _fetchDraftPaymentSummaries(
     ErpNextSession session,
   ) async {
-    final counts = <String, int>{};
+    final summaries = <String, _DraftPaymentSummary>{};
     var start = 0;
 
     while (true) {
       final uri = Uri.parse('$baseUrl/api/resource/Payment%20Entry').replace(
         queryParameters: {
-          'fields': jsonEncode(['name', 'party']),
+          'fields': jsonEncode(['name', 'party', 'creation']),
           'filters': jsonEncode([
             ['docstatus', '=', 0],
             ['party_type', '=', 'Customer'],
@@ -112,20 +112,25 @@ class ErpNextCustomerService implements DraftPaymentCustomerSource {
       for (final row in rows) {
         final customerId = row['party']?.toString().trim();
         if (customerId == null || customerId.isEmpty) continue;
-        counts.update(customerId, (count) => count + 1, ifAbsent: () => 1);
+        final createdAt = _parseErpNextDateTime(row['creation']);
+        final current = summaries[customerId];
+        summaries[customerId] = _DraftPaymentSummary(
+          count: (current?.count ?? 0) + 1,
+          latestCreatedAt: _latestDateTime(current?.latestCreatedAt, createdAt),
+        );
       }
 
       if (rows.length < _pageLength) break;
       start += _pageLength;
     }
 
-    return counts;
+    return summaries;
   }
 
   Future<List<DraftPaymentCustomer>> _fetchCustomerBatch({
     required ErpNextSession session,
     required List<String> customerIds,
-    required Map<String, int> draftCounts,
+    required Map<String, _DraftPaymentSummary> draftPayments,
   }) async {
     final uri = Uri.parse('$baseUrl/api/resource/Customer').replace(
       queryParameters: {
@@ -148,6 +153,7 @@ class ErpNextCustomerService implements DraftPaymentCustomerSource {
           final rawCustomerName = row['customer_name']?.toString().trim() ?? '';
           final imagePath = row['image']?.toString().trim();
 
+          final draftPayment = draftPayments[customerId];
           return DraftPaymentCustomer(
             customerId: customerId,
             customerName: rawCustomerName.isEmpty
@@ -155,7 +161,8 @@ class ErpNextCustomerService implements DraftPaymentCustomerSource {
                 : rawCustomerName,
             phoneNumber: phoneNumber,
             imageUrl: _absoluteImageUrl(imagePath),
-            draftPaymentCount: draftCounts[customerId] ?? 1,
+            draftPaymentCount: draftPayment?.count ?? 1,
+            latestPaymentEntryCreatedAt: draftPayment?.latestCreatedAt,
           );
         })
         .whereType<DraftPaymentCustomer>()
@@ -207,4 +214,26 @@ class ErpNextCustomerService implements DraftPaymentCustomerSource {
     if (uri.hasScheme) return uri.toString();
     return Uri.parse(baseUrl).resolveUri(uri).toString();
   }
+
+  static DateTime? _parseErpNextDateTime(Object? value) {
+    final timestamp = value?.toString().trim();
+    if (timestamp == null || timestamp.isEmpty) return null;
+    return DateTime.tryParse(timestamp.replaceFirst(' ', 'T'));
+  }
+
+  static DateTime? _latestDateTime(DateTime? first, DateTime? second) {
+    if (first == null) return second;
+    if (second == null) return first;
+    return first.isAfter(second) ? first : second;
+  }
+}
+
+class _DraftPaymentSummary {
+  final int count;
+  final DateTime? latestCreatedAt;
+
+  const _DraftPaymentSummary({
+    required this.count,
+    required this.latestCreatedAt,
+  });
 }

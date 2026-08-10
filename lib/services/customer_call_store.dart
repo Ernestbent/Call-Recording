@@ -32,6 +32,10 @@ class RecordingBatchUploadResult {
 class CustomerCallStore extends ChangeNotifier {
   static const Duration _recordingWindowStartOffset = Duration(seconds: 30);
   static const Duration _recordingWindowDuration = Duration(minutes: 2);
+  static const String _erpNextBaseUrl = String.fromEnvironment(
+    'ERPNEXT_BASE_URL',
+    defaultValue: 'http://127.0.0.1:8082',
+  );
   static const String _testRecordingPhoneNumber = String.fromEnvironment(
     'TEST_RECORDING_PHONE_NUMBER',
   );
@@ -289,6 +293,8 @@ class CustomerCallStore extends ChangeNotifier {
           profileImageUrl: remoteCustomer.imageUrl,
           profileImageHeaders: imageHeaders,
           draftPaymentCount: remoteCustomer.draftPaymentCount,
+          latestPaymentEntryCreatedAt:
+              remoteCustomer.latestPaymentEntryCreatedAt,
           subtitle: draftLabel,
           statusLabel: previous?.statusLabel ?? 'Ready to call',
           lastCallStartedAt: previous?.lastCallStartedAt,
@@ -557,7 +563,7 @@ class CustomerCallStore extends ChangeNotifier {
           (current) => current.copyWith(
             statusLabel: latestRecording == null
                 ? current.lastCallStartedAt == null
-                      ? 'No call has been started from this app'
+                      ? 'Ready to call'
                       : 'No recordings matched the last app call'
                 : uploadFailed
                 ? '${matchingRecordings.length} recording${matchingRecordings.length == 1 ? '' : 's'} ready; upload pending'
@@ -715,7 +721,12 @@ class CustomerCallStore extends ChangeNotifier {
     required ErpNextSession session,
   }) {
     final uri = imageUrl == null ? null : Uri.tryParse(imageUrl);
-    if (uri == null || uri.host != 'accounting.autozonepro.org') {
+    final erpNextUri = Uri.tryParse(_erpNextBaseUrl);
+    if (uri == null ||
+        erpNextUri == null ||
+        uri.scheme != erpNextUri.scheme ||
+        uri.host != erpNextUri.host ||
+        uri.port != erpNextUri.port) {
       return const {};
     }
     return {'Cookie': 'sid=${session.sessionId}'};

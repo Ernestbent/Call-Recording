@@ -499,7 +499,7 @@ class _CustomerCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.all(17),
-      decoration: AppSurfaces.card(radius: 16),
+      decoration: AppSurfaces.card(radius: 16, elevated: false),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -546,7 +546,7 @@ class _CustomerCard extends StatelessWidget {
                   ],
                 ),
               ),
-              _PulsingCallButton(
+              _CallButton(
                 key: Key('call-customer-${customer.phoneNumber}'),
                 onPressed: onCallTap,
                 customerName: customer.name,
@@ -565,6 +565,21 @@ class _CustomerCard extends StatelessWidget {
                 color: AppColors.muted,
               ),
             ),
+          if (customer.latestPaymentEntryCreatedAt != null) ...[
+            const SizedBox(height: 10),
+            Text(
+              _formatPaymentEntryCreatedAt(
+                customer.latestPaymentEntryCreatedAt!,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontFamily: 'Bubblegum Sans',
+                fontSize: 12,
+                color: AppColors.muted,
+              ),
+            ),
+          ],
           if (customer.statusLabel != 'Ready to call') ...[
             const SizedBox(height: 14),
             Container(
@@ -628,122 +643,58 @@ class _CustomerCard extends StatelessWidget {
     return '${parts.first.substring(0, 1)}${parts.last.substring(0, 1)}'
         .toUpperCase();
   }
+
+  static String _formatPaymentEntryCreatedAt(DateTime value) {
+    const months = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
+    final local = value.toLocal();
+    final hour = local.hour.toString().padLeft(2, '0');
+    final minute = local.minute.toString().padLeft(2, '0');
+    return 'Payment entry created ${local.day} ${months[local.month - 1]} ${local.year} at $hour:$minute';
+  }
 }
 
-class _PulsingCallButton extends StatefulWidget {
+class _CallButton extends StatelessWidget {
   final String customerName;
   final VoidCallback onPressed;
 
-  const _PulsingCallButton({
+  const _CallButton({
     super.key,
     required this.customerName,
     required this.onPressed,
   });
 
   @override
-  State<_PulsingCallButton> createState() => _PulsingCallButtonState();
-}
-
-class _PulsingCallButtonState extends State<_PulsingCallButton>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _controller;
-  late final Animation<double> _scale;
-  bool _hasStarted = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 650),
-    );
-    _scale = TweenSequence<double>([
-      TweenSequenceItem(
-        tween: Tween<double>(
-          begin: 1.0,
-          end: 1.14,
-        ).chain(CurveTween(curve: Curves.easeOutBack)),
-        weight: 42,
-      ),
-      TweenSequenceItem(
-        tween: Tween<double>(
-          begin: 1.14,
-          end: 0.96,
-        ).chain(CurveTween(curve: Curves.easeInOut)),
-        weight: 24,
-      ),
-      TweenSequenceItem(
-        tween: Tween<double>(
-          begin: 0.96,
-          end: 1.0,
-        ).chain(CurveTween(curve: Curves.easeOut)),
-        weight: 34,
-      ),
-    ]).animate(_controller);
-  }
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    if (_hasStarted) return;
-    _hasStarted = true;
-
-    final animationsDisabled =
-        MediaQuery.maybeOf(context)?.disableAnimations ?? false;
-    if (!animationsDisabled) {
-      _controller.repeat(count: 3);
-    }
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: _controller,
-      builder: (context, child) {
-        final pulse = math.sin(_controller.value * math.pi).abs();
-        return Transform.scale(
-          scale: _scale.value,
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              boxShadow: [
-                BoxShadow(
-                  color: AppColors.primary.withValues(
-                    alpha: 0.12 + (pulse * 0.2),
-                  ),
-                  blurRadius: 8 + (pulse * 8),
-                  spreadRadius: pulse * 2,
-                ),
-              ],
-            ),
-            child: child,
-          ),
-        );
-      },
-      child: IconButton(
-        onPressed: widget.onPressed,
-        tooltip: 'Call ${widget.customerName}',
-        iconSize: 44,
-        padding: const EdgeInsets.all(4),
-        icon: Image.asset(
-          'lib/images/call-center.png',
-          width: 44,
-          height: 44,
-          fit: BoxFit.contain,
-          filterQuality: FilterQuality.high,
-          semanticLabel: 'Call ${widget.customerName}',
+    return Tooltip(
+      message: 'Call $customerName',
+      child: FilledButton(
+        onPressed: onPressed,
+        style: FilledButton.styleFrom(
+          minimumSize: const Size(72, 44),
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+          backgroundColor: AppColors.primary,
+          foregroundColor: Colors.white,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
         ),
-        style: IconButton.styleFrom(
-          minimumSize: const Size(48, 48),
-          tapTargetSize: MaterialTapTargetSize.padded,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
+        child: const Text(
+          'Call',
+          style: TextStyle(
+            fontFamily: 'Bubblegum Sans',
+            fontSize: 15,
+            fontWeight: FontWeight.w400,
           ),
         ),
       ),
@@ -925,21 +876,7 @@ class _RecordingPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (recordings.isEmpty) {
-      return Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(14),
-        decoration: AppSurfaces.placeholder(radius: 12),
-        child: Text(
-          lastCallEndedAt == null
-              ? 'Call a customer and the recording will appear here.'
-              : 'Call started at ${_formatDateTime(lastCallStartedAt ?? lastCallEndedAt!)}. Last call ended at ${_formatDateTime(lastCallEndedAt!)}. No recording matched that call window.',
-          style: const TextStyle(
-            fontFamily: 'Bubblegum Sans',
-            fontSize: 13,
-            color: AppColors.muted,
-          ),
-        ),
-      );
+      return const SizedBox.shrink();
     }
 
     return Column(

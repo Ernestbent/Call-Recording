@@ -4,6 +4,7 @@ class DraftPaymentCustomer {
   final String phoneNumber;
   final String? imageUrl;
   final int draftPaymentCount;
+  final DateTime? latestPaymentEntryCreatedAt;
 
   const DraftPaymentCustomer({
     required this.customerId,
@@ -11,5 +12,6 @@ class DraftPaymentCustomer {
     required this.phoneNumber,
     required this.imageUrl,
     required this.draftPaymentCount,
+    this.latestPaymentEntryCreatedAt,
   });
 }

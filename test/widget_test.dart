@@ -243,63 +243,63 @@ void main() {
     },
   );
 
-  testWidgets('customer call image pops and photo opens in a large viewer', (
-    WidgetTester tester,
-  ) async {
-    final appState = CustomerCallStore(
-      customerSource: _EmptyDraftPaymentCustomerSource(),
-      initialCustomers: const [
-        CustomerContact(
-          name: 'Photo Customer',
-          phoneNumber: '0700000099',
-          profileImageUrl: 'https://example.com/customer.jpg',
-          subtitle: '1 draft payment entry',
-          statusLabel: 'Ready to call',
+  testWidgets(
+    'customer call uses text button and photo opens in a large viewer',
+    (WidgetTester tester) async {
+      final appState = CustomerCallStore(
+        customerSource: _EmptyDraftPaymentCustomerSource(),
+        initialCustomers: [
+          CustomerContact(
+            name: 'Photo Customer',
+            phoneNumber: '0700000099',
+            profileImageUrl: 'https://example.com/customer.jpg',
+            subtitle: '1 draft payment entry',
+            statusLabel: 'Ready to call',
+            latestPaymentEntryCreatedAt: DateTime(2026, 8, 3, 10, 30),
+          ),
+        ],
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.light,
+          home: CustomersScreen(appState: appState),
         ),
-      ],
-    );
+      );
 
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: AppTheme.light,
-        home: CustomersScreen(appState: appState),
-      ),
-    );
+      final callButton = find.byKey(const Key('call-customer-0700000099'));
+      final callButtonLabel = find.descendant(
+        of: callButton,
+        matching: find.text('Call'),
+      );
+      final callButtonImage = find.descendant(
+        of: callButton,
+        matching: find.byType(Image),
+      );
+      expect(callButton, findsOneWidget);
+      expect(callButtonLabel, findsOneWidget);
+      expect(callButtonImage, findsNothing);
+      expect(
+        find.text('Payment entry created 3 Aug 2026 at 10:30'),
+        findsOneWidget,
+      );
+      expect(find.text('No call has been started from this app'), findsNothing);
 
-    final callButton = find.byKey(const Key('call-customer-0700000099'));
-    final callTransform = find.descendant(
-      of: callButton,
-      matching: find.byType(Transform),
-    );
-    expect(callButton, findsOneWidget);
-    expect(callTransform, findsWidgets);
+      await tester.ensureVisible(
+        find.byKey(const Key('customer-avatar-0700000099')),
+      );
+      await tester.tap(find.byKey(const Key('customer-avatar-0700000099')));
+      await tester.pumpAndSettle();
 
-    final initialScale = tester
-        .widget<Transform>(callTransform.first)
-        .transform
-        .getMaxScaleOnAxis();
-    await tester.pump(const Duration(milliseconds: 180));
-    final poppedScale = tester
-        .widget<Transform>(callTransform.first)
-        .transform
-        .getMaxScaleOnAxis();
-    expect(poppedScale, greaterThan(initialScale));
+      expect(find.byKey(const Key('customer-image-viewer')), findsOneWidget);
+      expect(find.byType(InteractiveViewer), findsOneWidget);
+      expect(find.text('Photo Customer'), findsWidgets);
 
-    await tester.pump(const Duration(seconds: 2));
-    await tester.ensureVisible(
-      find.byKey(const Key('customer-avatar-0700000099')),
-    );
-    await tester.tap(find.byKey(const Key('customer-avatar-0700000099')));
-    await tester.pumpAndSettle();
-
-    expect(find.byKey(const Key('customer-image-viewer')), findsOneWidget);
-    expect(find.byType(InteractiveViewer), findsOneWidget);
-    expect(find.text('Photo Customer'), findsWidgets);
-
-    await tester.tap(find.byKey(const Key('close-customer-image-viewer')));
-    await tester.pumpAndSettle();
-    expect(find.byKey(const Key('customer-image-viewer')), findsNothing);
-  });
+      await tester.tap(find.byKey(const Key('close-customer-image-viewer')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('customer-image-viewer')), findsNothing);
+    },
+  );
 
   testWidgets('Settings profile shows the ERPNext user and logs out', (
     WidgetTester tester,

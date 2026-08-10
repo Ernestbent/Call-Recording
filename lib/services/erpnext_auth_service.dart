@@ -25,7 +25,7 @@ class ErpNextAuthException implements Exception {
 }
 
 class ErpNextAuthService implements ErpNextAuthenticator {
-  static const String defaultBaseUrl = 'https://accounting.autozonepro.org';
+  static const String defaultBaseUrl = 'http://127.0.0.1:8082';
   static const String _configuredBaseUrl = String.fromEnvironment(
     'ERPNEXT_BASE_URL',
     defaultValue: defaultBaseUrl,
