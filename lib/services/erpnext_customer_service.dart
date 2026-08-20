@@ -22,7 +22,7 @@ class ErpNextCustomerFetchException implements Exception {
 }
 
 class ErpNextCustomerService implements DraftPaymentCustomerSource {
-  static const String defaultBaseUrl = 'http://127.0.0.1:8082';
+  static const String defaultBaseUrl = 'https://accounting.autozonepro.org';
   static const String _configuredBaseUrl = String.fromEnvironment(
     'ERPNEXT_BASE_URL',
     defaultValue: defaultBaseUrl,
@@ -112,10 +112,16 @@ class ErpNextCustomerService implements DraftPaymentCustomerSource {
       for (final row in rows) {
         final customerId = row['party']?.toString().trim();
         if (customerId == null || customerId.isEmpty) continue;
+        final paymentEntryId = row['name']?.toString().trim();
         final createdAt = _parseErpNextDateTime(row['creation']);
         final current = summaries[customerId];
         summaries[customerId] = _DraftPaymentSummary(
           count: (current?.count ?? 0) + 1,
+          paymentEntryIds: [
+            ...?current?.paymentEntryIds,
+            if (paymentEntryId != null && paymentEntryId.isNotEmpty)
+              paymentEntryId,
+          ],
           latestCreatedAt: _latestDateTime(current?.latestCreatedAt, createdAt),
         );
       }
@@ -162,6 +168,7 @@ class ErpNextCustomerService implements DraftPaymentCustomerSource {
             phoneNumber: phoneNumber,
             imageUrl: _absoluteImageUrl(imagePath),
             draftPaymentCount: draftPayment?.count ?? 1,
+            paymentEntryIds: draftPayment?.paymentEntryIds ?? const [],
             latestPaymentEntryCreatedAt: draftPayment?.latestCreatedAt,
           );
         })
@@ -230,10 +237,12 @@ class ErpNextCustomerService implements DraftPaymentCustomerSource {
 
 class _DraftPaymentSummary {
   final int count;
+  final List<String> paymentEntryIds;
   final DateTime? latestCreatedAt;
 
   const _DraftPaymentSummary({
     required this.count,
+    required this.paymentEntryIds,
     required this.latestCreatedAt,
   });
 }

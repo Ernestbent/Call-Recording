@@ -102,13 +102,14 @@ void main() {
     expect(customers.single.customerName, 'Alpha Motors');
     expect(customers.single.phoneNumber, '0755962582');
     expect(customers.single.draftPaymentCount, 2);
+    expect(customers.single.paymentEntryIds, ['PAY-1', 'PAY-2']);
     expect(
       customers.single.latestPaymentEntryCreatedAt,
       DateTime(2026, 8, 3, 10, 30),
     );
     expect(
       customers.single.imageUrl,
-      'http://127.0.0.1:8082/private/files/alpha.jpg',
+      'https://accounting.autozonepro.org/private/files/alpha.jpg',
     );
   });
 
@@ -163,8 +164,9 @@ class _FakeDraftPaymentCustomerSource implements DraftPaymentCustomerSource {
         customerId: 'CUST-A',
         customerName: 'Alpha Motors',
         phoneNumber: '+256700000001',
-        imageUrl: 'http://127.0.0.1:8082/private/files/alpha.jpg',
+        imageUrl: 'https://accounting.autozonepro.org/private/files/alpha.jpg',
         draftPaymentCount: 2,
+        paymentEntryIds: const ['PAY-1', 'PAY-2'],
         latestPaymentEntryCreatedAt: DateTime(2026, 8, 3, 10, 30),
       ),
     ];

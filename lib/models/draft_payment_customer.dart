@@ -4,6 +4,7 @@ class DraftPaymentCustomer {
   final String phoneNumber;
   final String? imageUrl;
   final int draftPaymentCount;
+  final List<String> paymentEntryIds;
   final DateTime? latestPaymentEntryCreatedAt;
 
   const DraftPaymentCustomer({
@@ -12,6 +13,7 @@ class DraftPaymentCustomer {
     required this.phoneNumber,
     required this.imageUrl,
     required this.draftPaymentCount,
+    this.paymentEntryIds = const [],
     this.latestPaymentEntryCreatedAt,
   });
 }

@@ -22,7 +22,7 @@ void main() {
       late http.Request capturedRequest;
       final uploader = HttpRecordingUploader(
         endpoint: Uri.parse('https://example.test/api/recordings'),
-        credentialProvider: _TestCredentialProvider(),
+        credentialProvider: _TestCredentialManager(),
         client: MockClient((request) async {
           capturedRequest = request;
           return http.Response(
@@ -45,7 +45,11 @@ void main() {
         createdAt: '2026-07-24T13:00:20.000',
       );
 
-      final result = await uploader.upload(call: call, customerId: 'CUST-001');
+      final result = await uploader.upload(
+        call: call,
+        customerId: 'CUST-001',
+        agentEmail: 'agent@example.com',
+      );
 
       expect(result.uploadId, '123');
       expect(capturedRequest.method, 'POST');
@@ -74,17 +78,93 @@ void main() {
       expect(capturedRequest.body, contains('name="call_time"'));
       expect(capturedRequest.body, contains('13:00:20'));
       expect(capturedRequest.body, contains('name="duration_seconds"'));
+      expect(capturedRequest.body, contains('name="agent_username"'));
+      expect(capturedRequest.body, contains('agent@example.com'));
     },
   );
+
+  test('refreshes matching saved credentials from the agent catalog', () async {
+    final tempDirectory = await Directory.systemTemp.createTemp(
+      'recording-upload-refresh-test-',
+    );
+    final recording = File('${tempDirectory.path}/sample.mp3');
+    await recording.writeAsBytes([0x49, 0x44, 0x33, 0x04]);
+    addTearDown(() => tempDirectory.delete(recursive: true));
+
+    late http.Request capturedRequest;
+    final uploader = HttpRecordingUploader(
+      endpoint: Uri.parse('https://example.test/api/recordings'),
+      credentialProvider: _TestCredentialManager(
+        saved: const ApiCredentials(
+          email: 'agent@example.com',
+          apiKey: 'old-api-key',
+          apiSecret: 'old-api-secret',
+        ),
+        activated: const ApiCredentials(
+          email: 'agent@example.com',
+          apiKey: 'fresh-api-key',
+          apiSecret: 'fresh-api-secret',
+        ),
+      ),
+      client: MockClient((request) async {
+        capturedRequest = request;
+        return http.Response(
+          '{"ok":true,"call_log":{"id":123}}',
+          201,
+          headers: {'content-type': 'application/json'},
+        );
+      }),
+    );
+    final call = CallModel(
+      sessionId: 'call-123',
+      phoneNumber: '0755962582',
+      callType: 'outgoing',
+      duration: 17,
+      audioPath: recording.path,
+      status: 'pending',
+      createdAt: '2026-07-24T13:00:20.000',
+    );
+
+    await uploader.upload(
+      call: call,
+      customerId: 'CUST-001',
+      agentEmail: 'agent@example.com',
+    );
+
+    expect(
+      capturedRequest.headers['authorization'],
+      'token fresh-api-key:fresh-api-secret',
+    );
+  });
 }
 
-class _TestCredentialProvider implements ApiCredentialProvider {
-  @override
-  Future<ApiCredentials?> read() async {
-    return const ApiCredentials(
+class _TestCredentialManager implements AgentCredentialManager {
+  _TestCredentialManager({
+    this.saved = const ApiCredentials(
       email: 'agent@example.com',
       apiKey: 'test-api-key',
       apiSecret: 'test-api-secret',
-    );
+    ),
+    this.activated = const ApiCredentials(
+      email: 'agent@example.com',
+      apiKey: 'test-api-key',
+      apiSecret: 'test-api-secret',
+    ),
+  });
+
+  final ApiCredentials? saved;
+  final ApiCredentials activated;
+
+  @override
+  Future<ApiCredentials?> read() async {
+    return saved;
   }
+
+  @override
+  Future<ApiCredentials> activateForEmail(String email) async {
+    return activated;
+  }
+
+  @override
+  Future<void> clear() async {}
 }

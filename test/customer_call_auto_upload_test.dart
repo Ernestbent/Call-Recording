@@ -1,8 +1,11 @@
 import 'package:calls_recording/db/call_model.dart';
 import 'package:calls_recording/models/call_recording_file.dart';
 import 'package:calls_recording/models/customer_contact.dart';
+import 'package:calls_recording/models/draft_payment_customer.dart';
+import 'package:calls_recording/models/erpnext_session.dart';
 import 'package:calls_recording/repository/call_repository.dart';
 import 'package:calls_recording/services/customer_call_store.dart';
+import 'package:calls_recording/services/erpnext_customer_service.dart';
 import 'package:calls_recording/services/recording_upload_service.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -24,6 +27,7 @@ void main() {
             erpNextCustomerId: 'CUST-TEST-001',
             name: 'Test Customer',
             phoneNumber: '0772835195',
+            paymentEntryIds: ['PAY-1', 'PAY-2'],
             subtitle: '1 draft payment entry',
             statusLabel: 'Ready to call',
           ),
@@ -53,8 +57,76 @@ void main() {
       );
       expect(store.customers.single.statusLabel, 'Recording uploaded');
       expect(store.customersToCall, isEmpty);
+
+      final source = _FakeDraftPaymentCustomerSource([
+        _draftPaymentCustomer(['PAY-1', 'PAY-2']),
+      ]);
+      final refreshedStore = CustomerCallStore(customerSource: source);
+      await refreshedStore.loadDraftPaymentCustomers(_session);
+      expect(refreshedStore.customersToCall, isEmpty);
+
+      source.customers = [
+        _draftPaymentCustomer(['PAY-1', 'PAY-2', 'PAY-3']),
+      ];
+      await refreshedStore.refreshDraftPaymentCustomers();
+      expect(refreshedStore.customersToCall, hasLength(1));
+      expect(refreshedStore.customersToCall.single.draftPaymentCount, 1);
+      expect(
+        refreshedStore.customersToCall.single.subtitle,
+        '1 draft payment entry',
+      );
     },
   );
+
+  test('already-uploaded call hides its payment entries after upgrade', () async {
+    SharedPreferences.setMockInitialValues({});
+    final startedAt = DateTime(2026, 8, 3, 12);
+    final endedAt = startedAt.add(const Duration(seconds: 45));
+    final recording = CallRecordingFile(
+      filePath: '/recordings/test-call.mp3',
+      fileName: 'test-call.mp3',
+      lastModifiedTime: endedAt,
+    );
+    final persistence = _FakeCallPersistence()
+      ..savedCalls.add({
+        'session_id':
+            'call_0772835195_${startedAt.millisecondsSinceEpoch}_${endedAt.millisecondsSinceEpoch}',
+        'status': 'uploaded',
+      });
+    final uploader = _FakeRecordingUploader();
+    final store = CustomerCallStore(
+      callPersistence: persistence,
+      recordingUploader: uploader,
+      initialCustomers: const [
+        CustomerContact(
+          erpNextCustomerId: 'CUST-TEST-001',
+          name: 'Test Customer',
+          phoneNumber: '0772835195',
+          paymentEntryIds: ['PAY-1', 'PAY-2'],
+          subtitle: '2 draft payment entries',
+          statusLabel: 'Ready to call',
+        ),
+      ],
+    );
+
+    store.markCallStarted('0772835195', startedAt: startedAt);
+    await store.markCallCompleted(
+      phoneNumber: '0772835195',
+      callEndedAt: endedAt,
+      recording: recording,
+    );
+
+    expect(uploader.uploadedCalls, isEmpty);
+    expect(store.customersToCall, isEmpty);
+
+    final refreshedStore = CustomerCallStore(
+      customerSource: _FakeDraftPaymentCustomerSource([
+        _draftPaymentCustomer(['PAY-1', 'PAY-2']),
+      ]),
+    );
+    await refreshedStore.loadDraftPaymentCustomers(_session);
+    expect(refreshedStore.customersToCall, isEmpty);
+  });
 
   test('duplicate completion events upload only one recording', () async {
     SharedPreferences.setMockInitialValues({});
@@ -109,6 +181,35 @@ void main() {
   });
 }
 
+final _session = ErpNextSession(
+  sessionId: 'test-session',
+  userId: 'agent@example.com',
+  fullName: 'Agent',
+  createdAt: DateTime.utc(2026, 8, 3),
+);
+
+DraftPaymentCustomer _draftPaymentCustomer(List<String> paymentEntryIds) {
+  return DraftPaymentCustomer(
+    customerId: 'CUST-TEST-001',
+    customerName: 'Test Customer',
+    phoneNumber: '0772835195',
+    imageUrl: null,
+    draftPaymentCount: paymentEntryIds.length,
+    paymentEntryIds: paymentEntryIds,
+  );
+}
+
+class _FakeDraftPaymentCustomerSource implements DraftPaymentCustomerSource {
+  List<DraftPaymentCustomer> customers;
+
+  _FakeDraftPaymentCustomerSource(this.customers);
+
+  @override
+  Future<List<DraftPaymentCustomer>> fetchDraftPaymentCustomers(
+    ErpNextSession session,
+  ) async => customers;
+}
+
 class _FakeRecordingUploader implements RecordingUploader {
   final List<CallModel> uploadedCalls = [];
   final List<String?> customerIds = [];
@@ -120,6 +221,7 @@ class _FakeRecordingUploader implements RecordingUploader {
   Future<RecordingUploadResult> upload({
     required CallModel call,
     String? customerId,
+    String? agentEmail,
   }) async {
     uploadedCalls.add(call);
     customerIds.add(customerId);

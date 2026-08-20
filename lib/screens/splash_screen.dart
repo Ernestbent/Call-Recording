@@ -73,11 +73,9 @@ class _SplashScreenState extends State<SplashScreen>
         return null;
       }
 
-      final activeCredentials = await _credentialManager.read();
-      if (activeCredentials == null ||
-          !activeCredentials.belongsTo(session.userId)) {
-        await _credentialManager.activateForEmail(session.userId);
-      }
+      // Refresh secure storage from the bundled catalog so credential rotations
+      // take effect even when the signed-in email has not changed.
+      await _credentialManager.activateForEmail(session.userId);
       return session;
     } catch (_) {
       try {

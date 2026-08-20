@@ -7,6 +7,7 @@ class CustomerContact {
   final String? profileImageUrl;
   final Map<String, String> profileImageHeaders;
   final int draftPaymentCount;
+  final List<String> paymentEntryIds;
   final DateTime? latestPaymentEntryCreatedAt;
   final String subtitle;
   final String statusLabel;
@@ -25,6 +26,7 @@ class CustomerContact {
     this.profileImageUrl,
     this.profileImageHeaders = const {},
     this.draftPaymentCount = 0,
+    this.paymentEntryIds = const [],
     this.latestPaymentEntryCreatedAt,
     required this.subtitle,
     required this.statusLabel,
@@ -44,6 +46,7 @@ class CustomerContact {
     String? profileImageUrl,
     Map<String, String>? profileImageHeaders,
     int? draftPaymentCount,
+    List<String>? paymentEntryIds,
     DateTime? latestPaymentEntryCreatedAt,
     String? subtitle,
     String? statusLabel,
@@ -63,6 +66,7 @@ class CustomerContact {
       profileImageUrl: profileImageUrl ?? this.profileImageUrl,
       profileImageHeaders: profileImageHeaders ?? this.profileImageHeaders,
       draftPaymentCount: draftPaymentCount ?? this.draftPaymentCount,
+      paymentEntryIds: paymentEntryIds ?? this.paymentEntryIds,
       latestPaymentEntryCreatedAt:
           latestPaymentEntryCreatedAt ?? this.latestPaymentEntryCreatedAt,
       subtitle: subtitle ?? this.subtitle,

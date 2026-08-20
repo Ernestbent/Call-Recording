@@ -3,13 +3,19 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:calls_recording/db/call_model.dart';
+import 'package:calls_recording/models/api_credentials.dart';
 import 'package:calls_recording/services/agent_credential_service.dart';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class RecordingUploadSettings {
   static const String _endpointKey = 'recording_upload_endpoint';
+  static const Set<String> _legacyLocalEndpoints = {
+    'http://127.0.0.1:8002/api/mobile/cal-logs/',
+    'http://127.0.0.1:8002/api/mobile/call-logs/',
+  };
   static final Uri defaultEndpoint = Uri.parse(
     'https://erp.autozonepro.org/api/mobile/call-logs/',
   );
@@ -25,7 +31,13 @@ class RecordingUploadSettings {
       return initialEndpoint;
     }
 
-    final savedEndpoint = parseEndpoint(preferences.getString(_endpointKey));
+    final savedEndpointValue = preferences.getString(_endpointKey);
+    if (_legacyLocalEndpoints.contains(savedEndpointValue)) {
+      await preferences.setString(_endpointKey, defaultEndpoint.toString());
+      return defaultEndpoint;
+    }
+
+    final savedEndpoint = parseEndpoint(savedEndpointValue);
     if (savedEndpoint != null) return savedEndpoint;
     return defaultEndpoint;
   }
@@ -60,6 +72,7 @@ abstract interface class RecordingUploader {
   Future<RecordingUploadResult> upload({
     required CallModel call,
     String? customerId,
+    String? agentEmail,
   });
 }
 
@@ -105,8 +118,9 @@ class HttpRecordingUploader implements RecordingUploader {
   Future<RecordingUploadResult> upload({
     required CallModel call,
     String? customerId,
+    String? agentEmail,
   }) async {
-    final credentials = await _credentialProvider.read();
+    final credentials = await _credentialsForAgent(agentEmail);
     if (credentials == null) {
       throw const RecordingUploadException(
         'Sign in again before uploading recordings.',
@@ -143,6 +157,13 @@ class HttpRecordingUploader implements RecordingUploader {
       }
       final localCallStartedAt = callStartedAt.toLocal();
 
+      debugPrint(
+        'RECORDING_UPLOAD: POST $endpoint '
+        'session=${call.sessionId} customer=$normalizedCustomerId '
+        'agent=${agentEmail?.trim().isNotEmpty == true ? agentEmail!.trim() : "(none)"} '
+        'file=${recording.path.split(Platform.pathSeparator).last}',
+      );
+
       final request = http.MultipartRequest('POST', endpoint)
         ..headers.addAll({
           'Accept': 'application/json',
@@ -157,6 +178,8 @@ class HttpRecordingUploader implements RecordingUploader {
           'call_time': _formatTime(localCallStartedAt),
           'duration_seconds': '${call.duration}',
           'call_type': call.callType,
+          if (agentEmail != null && agentEmail.trim().isNotEmpty)
+            'agent_username': agentEmail.trim(),
         })
         ..files.add(
           await http.MultipartFile.fromPath(
@@ -170,6 +193,11 @@ class HttpRecordingUploader implements RecordingUploader {
           .send(request)
           .timeout(_uploadTimeout);
       final response = await http.Response.fromStream(streamedResponse);
+
+      debugPrint(
+        'RECORDING_UPLOAD: response ${response.statusCode} '
+        'session=${call.sessionId} body=${_debugBody(response.body)}',
+      );
 
       if (response.statusCode == 401) {
         throw const RecordingUploadException(
@@ -228,6 +256,44 @@ class HttpRecordingUploader implements RecordingUploader {
     }
   }
 
+  Future<ApiCredentials?> _credentialsForAgent(String? agentEmail) async {
+    final normalizedEmail = agentEmail?.trim().toLowerCase() ?? '';
+    final savedCredentials = await _credentialProvider.read();
+
+    if (normalizedEmail.isNotEmpty &&
+        _credentialProvider is AgentCredentialManager) {
+      try {
+        debugPrint(
+          'RECORDING_UPLOAD: activating credentials for $normalizedEmail',
+        );
+        return await _credentialProvider.activateForEmail(normalizedEmail);
+      } on AgentCredentialException catch (error) {
+        throw RecordingUploadException(error.message);
+      }
+    }
+
+    if (savedCredentials != null &&
+        (normalizedEmail.isEmpty ||
+            savedCredentials.belongsTo(normalizedEmail))) {
+      debugPrint(
+        'RECORDING_UPLOAD: using saved credentials '
+        'agent=${savedCredentials.email}',
+      );
+      return savedCredentials;
+    }
+
+    if (normalizedEmail.isEmpty ||
+        _credentialProvider is! AgentCredentialManager) {
+      debugPrint(
+        'RECORDING_UPLOAD: using saved credentials without agent match '
+        'agent=${savedCredentials?.email ?? "(none)"}',
+      );
+      return savedCredentials;
+    }
+
+    return savedCredentials;
+  }
+
   static String _formatDate(DateTime value) {
     final year = value.year.toString().padLeft(4, '0');
     final month = value.month.toString().padLeft(2, '0');
@@ -251,6 +317,12 @@ class HttpRecordingUploader implements RecordingUploader {
     } catch (_) {
       return null;
     }
+  }
+
+  static String _debugBody(String responseBody) {
+    final compact = responseBody.replaceAll(RegExp(r'\s+'), ' ').trim();
+    if (compact.isEmpty) return '(empty)';
+    return compact.length <= 180 ? compact : '${compact.substring(0, 180)}...';
   }
 
   static MediaType _contentTypeFor(String filePath) {

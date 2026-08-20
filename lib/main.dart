@@ -2,12 +2,14 @@ import 'package:calls_recording/controllers/call_controller.dart';
 import 'package:flutter/material.dart';
 import 'package:calls_recording/services/call_manager.dart';
 import 'package:calls_recording/services/customer_call_store.dart';
+import 'package:calls_recording/services/recording_upload_service.dart';
 import 'package:calls_recording/services/session_manager.dart';
 import 'package:calls_recording/screens/splash_screen.dart';
 import 'package:calls_recording/theme/app_theme.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await RecordingUploadSettings().readEndpoint();
   final customerCallStore = CustomerCallStore();
   await customerCallStore.hydrate();
 

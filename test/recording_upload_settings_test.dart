@@ -24,6 +24,19 @@ void main() {
     );
   });
 
+  test('migrates the saved local endpoint to production', () async {
+    SharedPreferences.setMockInitialValues({
+      'recording_upload_endpoint':
+          'http://127.0.0.1:8002/api/mobile/call-logs/',
+    });
+    final settings = RecordingUploadSettings();
+
+    expect(
+      await settings.readEndpoint(),
+      Uri.parse('https://erp.autozonepro.org/api/mobile/call-logs/'),
+    );
+  });
+
   test('rejects invalid recording API endpoints', () {
     expect(RecordingUploadSettings.parseEndpoint('not-a-url'), isNull);
     expect(RecordingUploadSettings.parseEndpoint('ftp://example.com'), isNull);

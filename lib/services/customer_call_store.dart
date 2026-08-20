@@ -35,12 +35,14 @@ class CustomerCallStore extends ChangeNotifier {
   static const Duration _duplicateCallTolerance = Duration(seconds: 15);
   static const String _erpNextBaseUrl = String.fromEnvironment(
     'ERPNEXT_BASE_URL',
-    defaultValue: 'http://127.0.0.1:8082',
+    defaultValue: 'https://accounting.autozonepro.org',
   );
   static const String _testRecordingPhoneNumber = String.fromEnvironment(
     'TEST_RECORDING_PHONE_NUMBER',
   );
   static const String _darkModeKey = 'app_dark_mode_enabled';
+  static const String _completedPaymentEntriesKey =
+      'completed_draft_payment_entry_ids';
 
   CustomerCallStore({
     CallPersistence? callPersistence,
@@ -59,6 +61,7 @@ class CustomerCallStore extends ChangeNotifier {
   final DraftPaymentCustomerSource _customerSource;
   final RecordingUploader _recordingUploader;
   final Map<String, RecordingUploadState> _recordingUploadStates = {};
+  final Set<String> _completedPaymentEntryIds = {};
   ErpNextSession? _activeErpNextSession;
   String? _queuedPhoneNumber;
   String? _activePhoneNumber;
@@ -68,6 +71,8 @@ class CustomerCallStore extends ChangeNotifier {
   bool _isLoadingCustomers = false;
   bool _isRecordingPlaying = false;
   bool _isDarkMode = false;
+  int _notificationBatchDepth = 0;
+  bool _hasBatchedNotification = false;
   int _customerLoadGeneration = 0;
   String? _lastAutomaticRecordingCustomerSignature;
   String? _customerLoadError;
@@ -83,12 +88,15 @@ class CustomerCallStore extends ChangeNotifier {
   Future<void> hydrate() async {
     final prefs = await SharedPreferences.getInstance();
     _isDarkMode = prefs.getBool(_darkModeKey) ?? false;
+    _completedPaymentEntryIds
+      ..clear()
+      ..addAll(prefs.getStringList(_completedPaymentEntriesKey) ?? const []);
 
     for (var i = 0; i < _customers.length; i++) {
       _customers[i] = _withPersistedCallTimestamps(_customers[i], prefs);
     }
 
-    notifyListeners();
+    _notifyListeners();
   }
 
   List<CustomerContact> get customers => List.unmodifiable(_customers);
@@ -111,14 +119,14 @@ class CustomerCallStore extends ChangeNotifier {
 
     final previousValue = _isDarkMode;
     _isDarkMode = enabled;
-    notifyListeners();
+    _notifyListeners();
 
     try {
       final preferences = await SharedPreferences.getInstance();
       await preferences.setBool(_darkModeKey, enabled);
     } catch (_) {
       _isDarkMode = previousValue;
-      notifyListeners();
+      _notifyListeners();
       rethrow;
     }
   }
@@ -151,7 +159,7 @@ class CustomerCallStore extends ChangeNotifier {
     _customerLoadError = null;
     _lastRecordingUploadError = null;
     _lastAutomaticRecordingCustomerSignature = null;
-    notifyListeners();
+    _notifyListeners();
   }
 
   bool isActiveRecording(CallRecordingFile recording) =>
@@ -165,6 +173,11 @@ class CustomerCallStore extends ChangeNotifier {
       RecordingUploadState.pending;
 
   bool _hasUploadedCall(CustomerContact customer) {
+    if (customer.paymentEntryIds.isNotEmpty &&
+        customer.paymentEntryIds.every(_completedPaymentEntryIds.contains)) {
+      return true;
+    }
+
     final recordings = customer.availableRecordings.isEmpty
         ? [if (customer.latestRecording != null) customer.latestRecording!]
         : customer.availableRecordings;
@@ -173,6 +186,28 @@ class CustomerCallStore extends ChangeNotifier {
           (recording) =>
               recordingUploadState(recording) == RecordingUploadState.uploaded,
         );
+  }
+
+  void _notifyListeners() {
+    if (_notificationBatchDepth > 0) {
+      _hasBatchedNotification = true;
+      return;
+    }
+
+    notifyListeners();
+  }
+
+  Future<T> _batchNotifications<T>(Future<T> Function() action) async {
+    _notificationBatchDepth++;
+    try {
+      return await action();
+    } finally {
+      _notificationBatchDepth--;
+      if (_notificationBatchDepth == 0 && _hasBatchedNotification) {
+        _hasBatchedNotification = false;
+        notifyListeners();
+      }
+    }
   }
 
   Future<RecordingBatchUploadResult> uploadAllRecordings() async {
@@ -195,7 +230,7 @@ class CustomerCallStore extends ChangeNotifier {
 
     _isUploadingAllRecordings = true;
     _lastRecordingUploadError = null;
-    notifyListeners();
+    _notifyListeners();
 
     var attempted = 0;
     var uploaded = 0;
@@ -247,7 +282,7 @@ class CustomerCallStore extends ChangeNotifier {
       );
     } finally {
       _isUploadingAllRecordings = false;
-      notifyListeners();
+      _notifyListeners();
     }
   }
 
@@ -258,7 +293,7 @@ class CustomerCallStore extends ChangeNotifier {
     _activeErpNextSession = session;
     _isLoadingCustomers = true;
     _customerLoadError = null;
-    notifyListeners();
+    _notifyListeners();
 
     try {
       final remoteCustomers = await _customerSource.fetchDraftPaymentCustomers(
@@ -269,6 +304,9 @@ class CustomerCallStore extends ChangeNotifier {
       }
 
       final prefs = await SharedPreferences.getInstance();
+      _completedPaymentEntryIds
+        ..clear()
+        ..addAll(prefs.getStringList(_completedPaymentEntriesKey) ?? const []);
       if (loadGeneration != _customerLoadGeneration) {
         return _customers.length;
       }
@@ -276,12 +314,18 @@ class CustomerCallStore extends ChangeNotifier {
       final refreshedCustomers = <CustomerContact>[];
 
       for (final remoteCustomer in remoteCustomers) {
+        final pendingPaymentEntryIds = remoteCustomer.paymentEntryIds
+            .where((id) => !_completedPaymentEntryIds.contains(id))
+            .toList(growable: false);
+        final visibleDraftPaymentCount = remoteCustomer.paymentEntryIds.isEmpty
+            ? remoteCustomer.draftPaymentCount
+            : pendingPaymentEntryIds.length;
         final previous =
             _customerForErpNextId(remoteCustomer.customerId) ??
             _customerForPhone(remoteCustomer.phoneNumber);
-        final draftLabel = remoteCustomer.draftPaymentCount == 1
+        final draftLabel = visibleDraftPaymentCount == 1
             ? '1 draft payment entry'
-            : '${remoteCustomer.draftPaymentCount} draft payment entries';
+            : '$visibleDraftPaymentCount draft payment entries';
         final imageHeaders = _authenticatedImageHeaders(
           imageUrl: remoteCustomer.imageUrl,
           session: session,
@@ -293,7 +337,8 @@ class CustomerCallStore extends ChangeNotifier {
           phoneNumber: remoteCustomer.phoneNumber,
           profileImageUrl: remoteCustomer.imageUrl,
           profileImageHeaders: imageHeaders,
-          draftPaymentCount: remoteCustomer.draftPaymentCount,
+          draftPaymentCount: visibleDraftPaymentCount,
+          paymentEntryIds: remoteCustomer.paymentEntryIds,
           latestPaymentEntryCreatedAt:
               remoteCustomer.latestPaymentEntryCreatedAt,
           subtitle: draftLabel,
@@ -331,7 +376,7 @@ class CustomerCallStore extends ChangeNotifier {
     } finally {
       if (loadGeneration == _customerLoadGeneration) {
         _isLoadingCustomers = false;
-        notifyListeners();
+        _notifyListeners();
       }
     }
   }
@@ -340,7 +385,7 @@ class CustomerCallStore extends ChangeNotifier {
     final session = _activeErpNextSession;
     if (session == null) {
       _customerLoadError = 'Log in to ERPNext before refreshing customers.';
-      notifyListeners();
+      _notifyListeners();
       return _customers.length;
     }
     return loadDraftPaymentCustomers(session);
@@ -526,7 +571,7 @@ class CustomerCallStore extends ChangeNotifier {
       final didPause = await ServiceStarter.pauseRecording();
       if (didPause) {
         _isRecordingPlaying = false;
-        notifyListeners();
+        _notifyListeners();
       }
       return didPause;
     }
@@ -535,7 +580,7 @@ class CustomerCallStore extends ChangeNotifier {
       final didResume = await ServiceStarter.resumeRecording();
       if (didResume) {
         _isRecordingPlaying = true;
-        notifyListeners();
+        _notifyListeners();
       }
       return didResume;
     }
@@ -544,30 +589,34 @@ class CustomerCallStore extends ChangeNotifier {
     if (didStart) {
       _activeRecordingPath = recording.filePath;
       _isRecordingPlaying = true;
-      notifyListeners();
+      _notifyListeners();
     }
     return didStart;
   }
 
-  Future<int> fetchRecordingsForAllCustomers() async {
+  Future<int> fetchRecordingsForAllCustomers({bool silent = false}) async {
     if (_isFetchingAllRecordings) return recordingsReadyCount;
 
-    _isFetchingAllRecordings = true;
-    notifyListeners();
+    if (!silent) {
+      _isFetchingAllRecordings = true;
+      _notifyListeners();
+    }
 
-    var matchedCustomers = 0;
-    final customerSnapshot = List<CustomerContact>.from(_customers);
+    Future<int> scanCustomers() async {
+      var matchedCustomers = 0;
+      final customerSnapshot = List<CustomerContact>.from(_customers);
 
-    try {
       for (final customer in customerSnapshot) {
-        _updateCustomer(
-          customer.phoneNumber,
-          (current) => current.copyWith(
-            statusLabel: 'Checking saved recordings...',
-            isCallQueued: false,
-            isCallInProgress: false,
-          ),
-        );
+        if (!silent) {
+          _updateCustomer(
+            customer.phoneNumber,
+            (current) => current.copyWith(
+              statusLabel: 'Checking saved recordings...',
+              isCallQueued: false,
+              isCallInProgress: false,
+            ),
+          );
+        }
 
         final recordings = await ServiceStarter.findRecordingsForPhone(
           customer.phoneNumber,
@@ -624,9 +673,19 @@ class CustomerCallStore extends ChangeNotifier {
       }
 
       return matchedCustomers;
+    }
+
+    try {
+      if (silent) {
+        return await _batchNotifications(scanCustomers);
+      }
+
+      return await scanCustomers();
     } finally {
-      _isFetchingAllRecordings = false;
-      notifyListeners();
+      if (!silent) {
+        _isFetchingAllRecordings = false;
+        _notifyListeners();
+      }
     }
   }
 
@@ -643,7 +702,7 @@ class CustomerCallStore extends ChangeNotifier {
     _lastAutomaticRecordingCustomerSignature = signature;
     unawaited(
       Future<void>.microtask(() async {
-        await fetchRecordingsForAllCustomers();
+        await fetchRecordingsForAllCustomers(silent: true);
       }),
     );
   }
@@ -656,7 +715,7 @@ class CustomerCallStore extends ChangeNotifier {
     if (customer == null) {
       _lastRecordingUploadError =
           'The configured test customer is not in the draft-payment list.';
-      notifyListeners();
+      _notifyListeners();
       return false;
     }
 
@@ -673,7 +732,7 @@ class CustomerCallStore extends ChangeNotifier {
     if (directFileRecordings.isEmpty) {
       _lastRecordingUploadError =
           'No saved phone recording matched ${customer.phoneNumber}.';
-      notifyListeners();
+      _notifyListeners();
       return false;
     }
 
@@ -754,7 +813,7 @@ class CustomerCallStore extends ChangeNotifier {
     if (index == -1) return;
 
     _customers[index] = update(_customers[index]);
-    notifyListeners();
+    _notifyListeners();
   }
 
   CustomerContact? _customerForPhone(String phoneNumber) {
@@ -923,16 +982,17 @@ class CustomerCallStore extends ChangeNotifier {
       _recordingUploadStates[recording.filePath] = RecordingUploadState.failed;
       _lastRecordingUploadError =
           'The call start time is missing. This recording remains pending.';
-      notifyListeners();
+      _notifyListeners();
       return null;
     }
 
     final existingCall = await _callPersistence.getCall(call.sessionId);
     if (existingCall?['status'] == 'uploaded') {
+      await _markPaymentEntriesCompleted(customer);
       _recordingUploadStates[recording.filePath] =
           RecordingUploadState.uploaded;
       _lastRecordingUploadError = null;
-      notifyListeners();
+      _notifyListeners();
       return call;
     }
 
@@ -942,7 +1002,7 @@ class CustomerCallStore extends ChangeNotifier {
     if (recordingUploadState(recording) != RecordingUploadState.failed) {
       _recordingUploadStates[recording.filePath] = RecordingUploadState.pending;
     }
-    notifyListeners();
+    _notifyListeners();
     return call;
   }
 
@@ -959,35 +1019,63 @@ class CustomerCallStore extends ChangeNotifier {
       _recordingUploadStates[recording.filePath] = RecordingUploadState.failed;
       _lastRecordingUploadError =
           'Recording upload is not configured. The recordings remain pending.';
-      notifyListeners();
+      _notifyListeners();
       return false;
     }
 
     _recordingUploadStates[recording.filePath] = RecordingUploadState.uploading;
     _lastRecordingUploadError = null;
-    notifyListeners();
+    _notifyListeners();
 
     try {
+      debugPrint(
+        'RECORDING_UPLOAD: starting upload '
+        'session=${call.sessionId} customer=${customer.erpNextCustomerId} '
+        'agent=${_activeErpNextSession?.userId ?? "(not logged in)"}',
+      );
       await _recordingUploader.upload(
         call: call,
         customerId: customer.erpNextCustomerId,
+        agentEmail: _activeErpNextSession?.userId,
       );
       await _callPersistence.updateStatus(call.sessionId, 'uploaded');
+      await _markPaymentEntriesCompleted(customer);
       _recordingUploadStates[recording.filePath] =
           RecordingUploadState.uploaded;
       _lastRecordingUploadError = null;
-      notifyListeners();
+      debugPrint('RECORDING_UPLOAD: uploaded session=${call.sessionId}');
+      _notifyListeners();
       return true;
     } on RecordingUploadException catch (error) {
       _recordingUploadStates[recording.filePath] = RecordingUploadState.failed;
       _lastRecordingUploadError = error.message;
+      debugPrint(
+        'RECORDING_UPLOAD: failed session=${call.sessionId} '
+        'reason=${error.message}',
+      );
     } catch (_) {
       _recordingUploadStates[recording.filePath] = RecordingUploadState.failed;
       _lastRecordingUploadError =
           'Could not upload the recording. It remains pending.';
+      debugPrint('RECORDING_UPLOAD: failed session=${call.sessionId}');
     }
-    notifyListeners();
+    _notifyListeners();
     return false;
+  }
+
+  Future<void> _markPaymentEntriesCompleted(CustomerContact customer) async {
+    if (customer.paymentEntryIds.isEmpty) return;
+
+    _completedPaymentEntryIds.addAll(customer.paymentEntryIds);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final sortedIds = _completedPaymentEntryIds.toList()..sort();
+      await prefs.setStringList(_completedPaymentEntriesKey, sortedIds);
+    } catch (error) {
+      debugPrint(
+        'RECORDING_UPLOAD: could not persist completed payment entries: $error',
+      );
+    }
   }
 
   CallModel? _callForRecording({
@@ -1048,7 +1136,7 @@ class CustomerCallStore extends ChangeNotifier {
     if (_activeRecordingPath != filePath) return;
     _activeRecordingPath = null;
     _isRecordingPlaying = false;
-    notifyListeners();
+    _notifyListeners();
   }
 }
 

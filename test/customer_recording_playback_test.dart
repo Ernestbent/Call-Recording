@@ -151,6 +151,7 @@ class _FakeRecordingUploader implements RecordingUploader {
   Future<RecordingUploadResult> upload({
     required CallModel call,
     String? customerId,
+    String? agentEmail,
   }) async {
     uploadedCalls.add(call);
     return RecordingUploadResult(
