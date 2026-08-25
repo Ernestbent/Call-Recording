@@ -23,7 +23,7 @@ class MainActivity : FlutterActivity() {
 
     private val CHANNEL = "call_recorder_service"
     private val TAG = "CALL_RECORD_LOOKUP"
-    private val audioExtensions = setOf("mp3", "m4a", "wav")
+    private val audioExtensions = setOf("mp3", "m4a", "wav", "aac")
     private lateinit var methodChannel: MethodChannel
     private var mediaPlayer: MediaPlayer? = null
     private var activeRecordingPath: String? = null
@@ -36,7 +36,8 @@ class MainActivity : FlutterActivity() {
         "Recordings/",
         "MIUI/sound_recorder/",
         "MIUI/sound_recorder/call_rec/",
-        "Samsung/Call/"
+        "Samsung/Call/",
+        "Music/PhoneRecord/"
     )
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -150,15 +151,15 @@ class MainActivity : FlutterActivity() {
             "Lookup started. phone=$phoneNumber normalized=$normalizedTarget callEnd=$callEndTimeMillis"
         )
         val latestPhoneMatch = newerCandidate(
-            findLatestPhoneMatchMediaStore(normalizedTarget),
             findLatestPhoneMatch(
                 directories = buildRecordingDirectories(),
                 normalizedTarget = normalizedTarget
-            )?.toRecordingCandidate()
+            )?.toRecordingCandidate(),
+            findLatestPhoneMatchMediaStore(normalizedTarget)
         )
         val latestRecording = latestPhoneMatch ?: newerCandidate(
-            findLatestMediaStoreRecording(),
-            findLatestRecordingFile(buildRecordingDirectories())?.toRecordingCandidate()
+            findLatestRecordingFile(buildRecordingDirectories())?.toRecordingCandidate(),
+            findLatestMediaStoreRecording()
         )
         Log.d(
             TAG,
@@ -177,15 +178,24 @@ class MainActivity : FlutterActivity() {
         logDirectoryAccess(directories)
         val matches = LinkedHashMap<String, RecordingCandidate>()
 
-        findAllPhoneMatchesMediaStore(normalizedTarget).forEach { candidate ->
-            matches[candidate.filePath] = candidate
-        }
-
         findAllPhoneMatchesInFiles(
             directories = directories,
             normalizedTarget = normalizedTarget
         ).forEach { candidate ->
             matches[candidate.filePath] = candidate
+        }
+
+        findAllPhoneMatchesMediaStore(normalizedTarget).forEach { candidate ->
+            val directFileAlreadyFound = matches.values.any { directCandidate ->
+                !directCandidate.filePath.startsWith("content://") &&
+                    directCandidate.fileName == candidate.fileName &&
+                    abs(
+                        directCandidate.lastModifiedTime - candidate.lastModifiedTime
+                    ) < 2_000L
+            }
+            if (!directFileAlreadyFound) {
+                matches[candidate.filePath] = candidate
+            }
         }
 
         Log.d(TAG, "Phone match results for $normalizedTarget count=${matches.size}")
@@ -200,7 +210,8 @@ class MainActivity : FlutterActivity() {
             .filter { candidate ->
                 phoneNumbersMatch(
                     normalizedTarget,
-                    extractPhoneNumberFromFileName(candidate.fileName)
+                    candidate.phoneNumber
+                        ?: extractPhoneNumberFromFileName(candidate.fileName)
                 )
             }
     }
@@ -220,7 +231,7 @@ class MainActivity : FlutterActivity() {
                     .onFail { _, _ -> }
                     .filter { file -> file.isFile && isSupportedAudio(file) }
                     .forEach { file ->
-                        val extractedPhone = extractPhoneNumberFromFileName(file.name)
+                        val extractedPhone = extractPhoneNumberFromPath(file.absolutePath)
                         if (!phoneNumbersMatch(normalizedTarget, extractedPhone)) {
                             return@forEach
                         }
@@ -313,6 +324,7 @@ class MainActivity : FlutterActivity() {
                 idColumn = MediaStore.Audio.Media._ID,
                 nameColumn = MediaStore.Audio.Media.DISPLAY_NAME,
                 modifiedColumn = MediaStore.Audio.Media.DATE_MODIFIED,
+                relativePathColumn = MediaStore.Audio.Media.RELATIVE_PATH,
                 sourceLabel = "Audio.Media"
             )
         }
@@ -347,6 +359,7 @@ class MainActivity : FlutterActivity() {
                 idColumn = MediaStore.Files.FileColumns._ID,
                 nameColumn = MediaStore.Files.FileColumns.DISPLAY_NAME,
                 modifiedColumn = MediaStore.Files.FileColumns.DATE_MODIFIED,
+                relativePathColumn = MediaStore.Files.FileColumns.RELATIVE_PATH,
                 sourceLabel = "Files"
             )
         }
@@ -358,11 +371,13 @@ class MainActivity : FlutterActivity() {
         idColumn: String,
         nameColumn: String,
         modifiedColumn: String,
+        relativePathColumn: String,
         sourceLabel: String
     ): List<RecordingCandidate> {
         val idIndex = cursor.getColumnIndexOrThrow(idColumn)
         val nameIndex = cursor.getColumnIndexOrThrow(nameColumn)
         val dateModifiedIndex = cursor.getColumnIndexOrThrow(modifiedColumn)
+        val relativePathIndex = cursor.getColumnIndexOrThrow(relativePathColumn)
         val results = mutableListOf<RecordingCandidate>()
 
         while (cursor.moveToNext()) {
@@ -373,12 +388,14 @@ class MainActivity : FlutterActivity() {
 
             val id = cursor.getLong(idIndex)
             val lastModified = cursor.getLong(dateModifiedIndex) * 1000L
+            val relativePath = cursor.getString(relativePathIndex).orEmpty()
             val contentUri = ContentUris.withAppendedId(contentBaseUri, id)
             results.add(
                 RecordingCandidate(
                     filePath = contentUri.toString(),
                     fileName = displayName,
-                    lastModifiedTime = lastModified
+                    lastModifiedTime = lastModified,
+                    phoneNumber = extractPhoneNumberFromPath("$relativePath$displayName")
                 )
             )
         }
@@ -405,7 +422,7 @@ class MainActivity : FlutterActivity() {
                     .onFail { _, _ -> }
                     .filter { file -> file.isFile && isSupportedAudio(file) }
                     .forEach { file ->
-                        val extractedPhone = extractPhoneNumberFromFileName(file.name)
+                        val extractedPhone = extractPhoneNumberFromPath(file.absolutePath)
                         if (!phoneNumbersMatch(normalizedTarget, extractedPhone)) {
                             return@forEach
                         }
@@ -641,6 +658,13 @@ class MainActivity : FlutterActivity() {
         return normalizePhoneNumber(fallbackMatch)
     }
 
+    private fun extractPhoneNumberFromPath(path: String): String? {
+        return path
+            .split('/', '\\')
+            .asReversed()
+            .firstNotNullOfOrNull(::extractPhoneNumberFromFileName)
+    }
+
     private fun isPlausiblePhoneDigits(value: String): Boolean {
         return when {
             value.startsWith("00") -> value.length in 11..15
@@ -701,7 +725,8 @@ class MainActivity : FlutterActivity() {
             "/storage/emulated/0/Recordings/",
             "/storage/emulated/0/MIUI/sound_recorder/",
             "/storage/emulated/0/MIUI/sound_recorder/call_rec/",
-            "/storage/emulated/0/Samsung/Call/"
+            "/storage/emulated/0/Samsung/Call/",
+            "/storage/emulated/0/Music/PhoneRecord/"
         )
 
         filesDir.parentFile?.let { appDataRoot ->
@@ -892,7 +917,8 @@ class MainActivity : FlutterActivity() {
     private data class RecordingCandidate(
         val filePath: String,
         val fileName: String,
-        val lastModifiedTime: Long
+        val lastModifiedTime: Long,
+        val phoneNumber: String? = null
     ) {
         fun toResultMap(): Map<String, Any> {
             return mapOf(
@@ -907,7 +933,8 @@ class MainActivity : FlutterActivity() {
         return RecordingCandidate(
             filePath = absolutePath,
             fileName = name,
-            lastModifiedTime = lastModified()
+            lastModifiedTime = lastModified(),
+            phoneNumber = extractPhoneNumberFromPath(absolutePath)
         )
     }
 }

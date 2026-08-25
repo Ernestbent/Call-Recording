@@ -2,6 +2,9 @@ class CallRecordingFile {
   static final RegExp _fileNameTimestampRegex = RegExp(
     r'(?<!\d)(\d{14})(?!\d)',
   );
+  static final RegExp _datedFileNameTimestampRegex = RegExp(
+    r'(?<!\d)(\d{4})-(\d{2})-(\d{2})_(\d{2})\.(\d{2})\.(\d{2})(?!\d)',
+  );
 
   final String filePath;
   final String fileName;
@@ -25,14 +28,26 @@ class CallRecordingFile {
 
   DateTime? get fileNameTimestamp {
     final rawTimestamp = _fileNameTimestampRegex.firstMatch(fileName)?.group(1);
-    if (rawTimestamp == null) return null;
+    final datedTimestamp = _datedFileNameTimestampRegex.firstMatch(fileName);
 
-    final year = int.tryParse(rawTimestamp.substring(0, 4));
-    final month = int.tryParse(rawTimestamp.substring(4, 6));
-    final day = int.tryParse(rawTimestamp.substring(6, 8));
-    final hour = int.tryParse(rawTimestamp.substring(8, 10));
-    final minute = int.tryParse(rawTimestamp.substring(10, 12));
-    final second = int.tryParse(rawTimestamp.substring(12, 14));
+    final year = int.tryParse(
+      rawTimestamp?.substring(0, 4) ?? datedTimestamp?.group(1) ?? '',
+    );
+    final month = int.tryParse(
+      rawTimestamp?.substring(4, 6) ?? datedTimestamp?.group(2) ?? '',
+    );
+    final day = int.tryParse(
+      rawTimestamp?.substring(6, 8) ?? datedTimestamp?.group(3) ?? '',
+    );
+    final hour = int.tryParse(
+      rawTimestamp?.substring(8, 10) ?? datedTimestamp?.group(4) ?? '',
+    );
+    final minute = int.tryParse(
+      rawTimestamp?.substring(10, 12) ?? datedTimestamp?.group(5) ?? '',
+    );
+    final second = int.tryParse(
+      rawTimestamp?.substring(12, 14) ?? datedTimestamp?.group(6) ?? '',
+    );
 
     if ([year, month, day, hour, minute, second].contains(null)) {
       return null;
