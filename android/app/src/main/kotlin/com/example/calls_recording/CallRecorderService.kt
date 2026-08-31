@@ -9,7 +9,6 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.media.MediaRecorder
 import android.os.Build
 import android.os.IBinder
 import android.provider.CallLog
@@ -21,15 +20,9 @@ import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import org.json.JSONArray
 import org.json.JSONObject
-import java.io.File
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 import java.util.concurrent.Executors
 
 class CallRecorderService : Service() {
-    private var recorder: MediaRecorder? = null
-    private var activeRecordingFile: File? = null
     private var callStartedAtMillis: Long? = null
     private var telephonyManager: TelephonyManager? = null
     private var callCallback: TelephonyCallback? = null
@@ -129,74 +122,19 @@ class CallRecorderService : Service() {
         if (callStartedAtMillis != null) return
         callStartedAtMillis = System.currentTimeMillis()
         updateNotification("Call in progress")
-        startRecording()
     }
 
     private fun handleCallEnded() {
         val startedAt = callStartedAtMillis ?: return
         callStartedAtMillis = null
         val endedAt = System.currentTimeMillis()
-        val recording = stopRecording()
         updateNotification("Processing completed call")
-        resolveAndPersistCall(startedAt, endedAt, recording, attempt = 1)
-    }
-
-    private fun startRecording() {
-        if (recorder != null) return
-
-        val recordingsDir = File(filesDir.parentFile, "app_flutter/recordings").apply {
-            mkdirs()
-        }
-        val file = File(recordingsDir, "call_${System.currentTimeMillis()}.m4a")
-
-        try {
-            recorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                MediaRecorder(this)
-            } else {
-                @Suppress("DEPRECATION")
-                MediaRecorder()
-            }.apply {
-                setAudioSource(MediaRecorder.AudioSource.MIC)
-                setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
-                setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
-                setOutputFile(file.absolutePath)
-                prepare()
-                start()
-            }
-            activeRecordingFile = file
-        } catch (error: Exception) {
-            Log.e(TAG, "Unable to start service recording", error)
-            recorder?.release()
-            recorder = null
-            activeRecordingFile = null
-            file.delete()
-        }
-    }
-
-    private fun stopRecording(): File? {
-        val currentRecorder = recorder
-        val recordingFile = activeRecordingFile
-        recorder = null
-        activeRecordingFile = null
-
-        if (currentRecorder != null) {
-            try {
-                currentRecorder.stop()
-            } catch (error: RuntimeException) {
-                Log.w(TAG, "Service recording was too short or invalid", error)
-                recordingFile?.delete()
-            } finally {
-                currentRecorder.release()
-            }
-        }
-
-        return recordingFile?.takeIf { it.exists() && it.length() > 0L }
+        resolveAndPersistCall(startedAt, endedAt, attempt = 1)
     }
 
     private fun resolveAndPersistCall(
         startedAt: Long,
         endedAt: Long,
-        recording: File?,
         attempt: Int
     ) {
         worker.execute {
@@ -207,7 +145,6 @@ class CallRecorderService : Service() {
                         resolveAndPersistCall(
                             startedAt,
                             endedAt,
-                            recording,
                             attempt + 1
                         )
                     },
@@ -218,7 +155,6 @@ class CallRecorderService : Service() {
             }
 
             val normalizedPhone = normalizeUgandaPhoneNumber(phoneNumber)
-            val resolvedRecording = renameRecording(recording, normalizedPhone, startedAt)
             if (normalizedPhone != null) {
                 persistFlutterCallTimestamps(normalizedPhone, startedAt, endedAt)
             }
@@ -226,7 +162,7 @@ class CallRecorderService : Service() {
                 phoneNumber = normalizedPhone,
                 startedAt = startedAt,
                 endedAt = endedAt,
-                recording = resolvedRecording
+                recording = null
             )
             updateNotification("Listening for calls")
         }
@@ -263,13 +199,6 @@ class CallRecorderService : Service() {
         }
     }
 
-    private fun renameRecording(file: File?, phoneNumber: String?, startedAt: Long): File? {
-        if (file == null || !file.exists() || phoneNumber == null) return file
-        val timestamp = SimpleDateFormat("yyyyMMddHHmmss", Locale.US).format(Date(startedAt))
-        val renamed = File(file.parentFile, "call_($phoneNumber)_$timestamp.m4a")
-        return if (file.renameTo(renamed)) renamed else file
-    }
-
     private fun persistFlutterCallTimestamps(
         phoneNumber: String,
         startedAt: Long,
@@ -288,7 +217,7 @@ class CallRecorderService : Service() {
         phoneNumber: String?,
         startedAt: Long,
         endedAt: Long,
-        recording: File?
+        recording: java.io.File?
     ) {
         synchronized(COMPLETED_CALL_LOCK) {
             val preferences = getSharedPreferences(SERVICE_PREFERENCES, Context.MODE_PRIVATE)
@@ -317,7 +246,6 @@ class CallRecorderService : Service() {
     }
 
     override fun onDestroy() {
-        stopRecording()
         val manager = telephonyManager
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             callCallback?.let { manager?.unregisterTelephonyCallback(it) }

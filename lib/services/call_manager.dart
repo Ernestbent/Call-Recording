@@ -17,10 +17,6 @@ class CallManager {
         '   Phone: ${phoneStatus.isGranted ? "✅ GRANTED" : "❌ DENIED"}',
       );
 
-      debugPrint('📱 Requesting Microphone permission...');
-      final micStatus = await Permission.microphone.request();
-      debugPrint('   Mic: ${micStatus.isGranted ? "✅ GRANTED" : "❌ DENIED"}');
-
       if (Platform.isAndroid) {
         debugPrint('📱 Requesting Notification permission...');
         final notificationStatus = await Permission.notification.request();
@@ -54,10 +50,7 @@ class CallManager {
           storageStatus.isGranted ||
           audioStatus.isGranted ||
           (manageStorageStatus?.isGranted ?? false);
-      final allGranted =
-          phoneStatus.isGranted &&
-          micStatus.isGranted &&
-          hasRecordingFileAccess;
+      final allGranted = phoneStatus.isGranted && hasRecordingFileAccess;
 
       debugPrint(
         allGranted ? '✅ All permissions granted' : '❌ Some permissions denied',

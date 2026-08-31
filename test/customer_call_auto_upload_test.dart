@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:calls_recording/db/call_model.dart';
 import 'package:calls_recording/models/call_recording_file.dart';
 import 'package:calls_recording/models/customer_contact.dart';
@@ -7,6 +9,7 @@ import 'package:calls_recording/repository/call_repository.dart';
 import 'package:calls_recording/services/customer_call_store.dart';
 import 'package:calls_recording/services/erpnext_customer_service.dart';
 import 'package:calls_recording/services/recording_upload_service.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -179,6 +182,109 @@ void main() {
     expect(store.customers.single.availableRecordings, [serviceRecording]);
     expect(store.customers.single.matchingRecordingsCount, 1);
   });
+
+  test(
+    'failed upload retries automatically without reopening the app',
+    () async {
+      SharedPreferences.setMockInitialValues({});
+      final uploader = _FakeRecordingUploader(failuresBeforeSuccess: 1);
+      final store = CustomerCallStore(
+        callPersistence: _FakeCallPersistence(),
+        customerSource: _FakeDraftPaymentCustomerSource([
+          _draftPaymentCustomer(['PAY-RETRY']),
+        ]),
+        recordingUploader: uploader,
+        automaticUploadRetryDelays: const [Duration(milliseconds: 10)],
+      );
+      addTearDown(store.dispose);
+      await store.loadDraftPaymentCustomers(_session);
+
+      final startedAt = DateTime(2026, 8, 3, 12);
+      final endedAt = startedAt.add(const Duration(seconds: 45));
+      final recording = CallRecordingFile(
+        filePath: '/recordings/retry-call.m4a',
+        fileName: 'retry-call.m4a',
+        lastModifiedTime: endedAt,
+      );
+
+      store.markCallStarted('0772835195', startedAt: startedAt);
+      await store.markCallCompleted(
+        phoneNumber: '0772835195',
+        callEndedAt: endedAt,
+        recording: recording,
+      );
+
+      expect(uploader.uploadedCalls, hasLength(1));
+      expect(
+        store.recordingUploadState(recording),
+        RecordingUploadState.failed,
+      );
+
+      await Future<void>.delayed(const Duration(milliseconds: 40));
+
+      expect(uploader.uploadedCalls, hasLength(2));
+      expect(
+        store.recordingUploadState(recording),
+        RecordingUploadState.uploaded,
+      );
+    },
+  );
+
+  test(
+    'offline pauses retries and connectivity restoration retries immediately',
+    () async {
+      SharedPreferences.setMockInitialValues({});
+      final connectivity = StreamController<List<ConnectivityResult>>();
+      final uploader = _FakeRecordingUploader(failuresBeforeSuccess: 1);
+      final store = CustomerCallStore(
+        callPersistence: _FakeCallPersistence(),
+        customerSource: _FakeDraftPaymentCustomerSource([
+          _draftPaymentCustomer(['PAY-CONNECTIVITY']),
+        ]),
+        recordingUploader: uploader,
+        automaticUploadRetryDelays: const [Duration(milliseconds: 10)],
+        connectivityChanges: connectivity.stream,
+      );
+      addTearDown(() async {
+        store.dispose();
+        await connectivity.close();
+      });
+      await store.loadDraftPaymentCustomers(_session);
+
+      final startedAt = DateTime(2026, 8, 3, 12);
+      final endedAt = startedAt.add(const Duration(seconds: 45));
+      final recording = CallRecordingFile(
+        filePath: '/recordings/connectivity-call.m4a',
+        fileName: 'connectivity-call.m4a',
+        lastModifiedTime: endedAt,
+      );
+
+      store.markCallStarted('0772835195', startedAt: startedAt);
+      await store.markCallCompleted(
+        phoneNumber: '0772835195',
+        callEndedAt: endedAt,
+        recording: recording,
+      );
+      expect(uploader.uploadedCalls, hasLength(1));
+
+      connectivity.add(const [ConnectivityResult.none]);
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+      expect(
+        uploader.uploadedCalls,
+        hasLength(1),
+        reason: 'No POST retry should run while the device is offline.',
+      );
+
+      connectivity.add(const [ConnectivityResult.wifi]);
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+
+      expect(uploader.uploadedCalls, hasLength(2));
+      expect(
+        store.recordingUploadState(recording),
+        RecordingUploadState.uploaded,
+      );
+    },
+  );
 }
 
 final _session = ErpNextSession(
@@ -211,8 +317,11 @@ class _FakeDraftPaymentCustomerSource implements DraftPaymentCustomerSource {
 }
 
 class _FakeRecordingUploader implements RecordingUploader {
+  _FakeRecordingUploader({this.failuresBeforeSuccess = 0});
+
   final List<CallModel> uploadedCalls = [];
   final List<String?> customerIds = [];
+  final int failuresBeforeSuccess;
 
   @override
   bool get isConfigured => true;
@@ -225,6 +334,11 @@ class _FakeRecordingUploader implements RecordingUploader {
   }) async {
     uploadedCalls.add(call);
     customerIds.add(customerId);
+    if (uploadedCalls.length <= failuresBeforeSuccess) {
+      throw const RecordingUploadException(
+        'Recording is still being finalized.',
+      );
+    }
     return const RecordingUploadResult(
       uploadId: '1',
       message: 'Recording uploaded successfully.',

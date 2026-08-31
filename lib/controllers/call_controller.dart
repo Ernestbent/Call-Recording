@@ -11,8 +11,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 class CallController with WidgetsBindingObserver {
   static const int _recordingLookupAttempts = 12;
-  static const Duration _recordingLookupInitialDelay = Duration(seconds: 4);
-  static const Duration _recordingLookupRetryDelay = Duration(seconds: 8);
+  static const Duration _recordingLookupInitialDelay = Duration(seconds: 30);
+  static const Duration _recordingLookupRetryDelay = Duration(seconds: 30);
   static const String _lastPhoneNumberKey = 'last_resolved_phone_number';
   static const String _lastCallStartedAtKey = 'last_call_started_at';
 

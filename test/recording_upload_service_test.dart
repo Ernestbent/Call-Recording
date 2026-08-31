@@ -23,6 +23,7 @@ void main() {
       final uploader = HttpRecordingUploader(
         endpoint: Uri.parse('https://example.test/api/recordings'),
         credentialProvider: _TestCredentialManager(),
+        fileInspector: const _ReadyRecordingInspector(),
         client: MockClient((request) async {
           capturedRequest = request;
           return http.Response(
@@ -94,6 +95,7 @@ void main() {
     late http.Request capturedRequest;
     final uploader = HttpRecordingUploader(
       endpoint: Uri.parse('https://example.test/api/recordings'),
+      fileInspector: const _ReadyRecordingInspector(),
       credentialProvider: _TestCredentialManager(
         saved: const ApiCredentials(
           email: 'agent@example.com',
@@ -136,6 +138,204 @@ void main() {
       'token fresh-api-key:fresh-api-secret',
     );
   });
+
+  test(
+    'uses finalized audio duration when stored call duration is zero',
+    () async {
+      final tempDirectory = await Directory.systemTemp.createTemp(
+        'recording-upload-duration-test-',
+      );
+      final recording = File('${tempDirectory.path}/sample.aac');
+      await recording.writeAsBytes([1, 2, 3, 4]);
+      addTearDown(() => tempDirectory.delete(recursive: true));
+
+      late http.Request capturedRequest;
+      final uploader = HttpRecordingUploader(
+        endpoint: Uri.parse('https://example.test/api/recordings'),
+        credentialProvider: _TestCredentialManager(),
+        fileInspector: const _ReadyRecordingInspector(durationSeconds: 23),
+        client: MockClient((request) async {
+          capturedRequest = request;
+          return http.Response(
+            '{"ok":true,"call_log":{"id":123}}',
+            201,
+            headers: {'content-type': 'application/json'},
+          );
+        }),
+      );
+
+      await uploader.upload(
+        call: CallModel(
+          sessionId: 'call-zero-duration',
+          phoneNumber: '0755962582',
+          callType: 'outgoing',
+          duration: 0,
+          audioPath: recording.path,
+          status: 'pending',
+          createdAt: '2026-07-24T13:00:20.000',
+        ),
+        customerId: 'CUST-001',
+        agentEmail: 'agent@example.com',
+      );
+
+      expect(capturedRequest.body, contains('name="duration_seconds"'));
+      expect(capturedRequest.body, contains('\r\n\r\n23\r\n'));
+      expect(capturedRequest.body, contains('content-type: audio/aac'));
+    },
+  );
+
+  test('does not send an empty or unfinished recording', () async {
+    final tempDirectory = await Directory.systemTemp.createTemp(
+      'recording-upload-empty-test-',
+    );
+    final recording = File('${tempDirectory.path}/empty.m4a');
+    await recording.writeAsBytes(const []);
+    addTearDown(() => tempDirectory.delete(recursive: true));
+
+    var requestWasSent = false;
+    final uploader = HttpRecordingUploader(
+      endpoint: Uri.parse('https://example.test/api/recordings'),
+      credentialProvider: _TestCredentialManager(),
+      fileInspector: const _UnreadyRecordingInspector(),
+      client: MockClient((request) async {
+        requestWasSent = true;
+        return http.Response('{}', 500);
+      }),
+    );
+
+    await expectLater(
+      uploader.upload(
+        call: CallModel(
+          sessionId: 'call-empty',
+          phoneNumber: '0755962582',
+          callType: 'outgoing',
+          duration: 0,
+          audioPath: recording.path,
+          status: 'pending',
+          createdAt: '2026-07-24T13:00:20.000',
+        ),
+        customerId: 'CUST-001',
+        agentEmail: 'agent@example.com',
+      ),
+      throwsA(
+        isA<RecordingUploadException>().having(
+          (error) => error.message,
+          'message',
+          contains('empty or still being finalized'),
+        ),
+      ),
+    );
+    expect(requestWasSent, isFalse);
+  });
+
+  test('does not upload an app microphone recording', () async {
+    final tempDirectory = await Directory.systemTemp.createTemp(
+      'recording-upload-mic-test-',
+    );
+    final recording = File(
+      '${tempDirectory.path}/app_flutter/recordings/call.m4a',
+    );
+    await recording.parent.create(recursive: true);
+    await recording.writeAsBytes([1, 2, 3, 4]);
+    addTearDown(() => tempDirectory.delete(recursive: true));
+
+    var requestWasSent = false;
+    final uploader = HttpRecordingUploader(
+      endpoint: Uri.parse('https://example.test/api/recordings'),
+      credentialProvider: _TestCredentialManager(),
+      fileInspector: const _ReadyRecordingInspector(),
+      client: MockClient((request) async {
+        requestWasSent = true;
+        return http.Response('{}', 500);
+      }),
+    );
+
+    await expectLater(
+      uploader.upload(
+        call: CallModel(
+          sessionId: 'call-app-mic',
+          phoneNumber: '0755962582',
+          callType: 'outgoing',
+          duration: 10,
+          audioPath: recording.path,
+          status: 'pending',
+          createdAt: '2026-07-24T13:00:20.000',
+        ),
+        customerId: 'CUST-001',
+        agentEmail: 'agent@example.com',
+      ),
+      throwsA(
+        isA<RecordingUploadException>().having(
+          (error) => error.message,
+          'message',
+          contains('not the phone dialer recording'),
+        ),
+      ),
+    );
+    expect(requestWasSent, isFalse);
+  });
+
+  test('device inspector requires a non-empty stable file', () async {
+    final tempDirectory = await Directory.systemTemp.createTemp(
+      'recording-readiness-test-',
+    );
+    final recording = File('${tempDirectory.path}/sample.m4a');
+    await recording.writeAsBytes([1, 2, 3, 4]);
+    addTearDown(() => tempDirectory.delete(recursive: true));
+
+    final inspector = DeviceRecordingFileInspector(
+      maxAttempts: 2,
+      retryDelay: Duration.zero,
+      durationReader: (_) async => 22500,
+    );
+
+    final readiness = await inspector.waitUntilReady(recording.path);
+    expect(readiness?.sizeBytes, 4);
+    expect(readiness?.durationSeconds, 23);
+  });
+
+  test('device inspector rejects a zero-byte file', () async {
+    final tempDirectory = await Directory.systemTemp.createTemp(
+      'recording-empty-readiness-test-',
+    );
+    final recording = File('${tempDirectory.path}/empty.aac');
+    await recording.writeAsBytes(const []);
+    addTearDown(() => tempDirectory.delete(recursive: true));
+
+    var durationWasRead = false;
+    final inspector = DeviceRecordingFileInspector(
+      maxAttempts: 2,
+      retryDelay: Duration.zero,
+      durationReader: (_) async {
+        durationWasRead = true;
+        return 1000;
+      },
+    );
+
+    expect(await inspector.waitUntilReady(recording.path), isNull);
+    expect(durationWasRead, isFalse);
+  });
+}
+
+class _ReadyRecordingInspector implements RecordingFileInspector {
+  final int durationSeconds;
+
+  const _ReadyRecordingInspector({this.durationSeconds = 17});
+
+  @override
+  Future<RecordingFileReadiness?> waitUntilReady(String filePath) async {
+    return RecordingFileReadiness(
+      sizeBytes: 4,
+      durationSeconds: durationSeconds,
+    );
+  }
+}
+
+class _UnreadyRecordingInspector implements RecordingFileInspector {
+  const _UnreadyRecordingInspector();
+
+  @override
+  Future<RecordingFileReadiness?> waitUntilReady(String filePath) async => null;
 }
 
 class _TestCredentialManager implements AgentCredentialManager {

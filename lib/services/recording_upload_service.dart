@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:calls_recording/db/call_model.dart';
 import 'package:calls_recording/models/api_credentials.dart';
 import 'package:calls_recording/services/agent_credential_service.dart';
+import 'package:calls_recording/services/service_starter.dart';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
@@ -92,6 +93,70 @@ class RecordingUploadException implements Exception {
   String toString() => message;
 }
 
+class RecordingFileReadiness {
+  final int sizeBytes;
+  final int durationSeconds;
+
+  const RecordingFileReadiness({
+    required this.sizeBytes,
+    required this.durationSeconds,
+  });
+}
+
+abstract interface class RecordingFileInspector {
+  Future<RecordingFileReadiness?> waitUntilReady(String filePath);
+}
+
+typedef RecordingDurationReader = Future<int?> Function(String filePath);
+
+class DeviceRecordingFileInspector implements RecordingFileInspector {
+  final int maxAttempts;
+  final Duration retryDelay;
+  final RecordingDurationReader durationReader;
+
+  DeviceRecordingFileInspector({
+    this.maxAttempts = 6,
+    this.retryDelay = const Duration(seconds: 2),
+    RecordingDurationReader? durationReader,
+  }) : durationReader =
+           durationReader ?? ServiceStarter.getRecordingDurationMillis;
+
+  @override
+  Future<RecordingFileReadiness?> waitUntilReady(String filePath) async {
+    final recording = File(filePath);
+    int? previousSize;
+
+    for (var attempt = 1; attempt <= maxAttempts; attempt++) {
+      if (!await recording.exists()) return null;
+
+      final sizeBytes = await recording.length();
+      final durationMillis = sizeBytes > 0
+          ? await durationReader(filePath)
+          : null;
+      final isStable = sizeBytes > 0 && sizeBytes == previousSize;
+
+      debugPrint(
+        'RECORDING_UPLOAD: readiness attempt=$attempt/$maxAttempts '
+        'size=$sizeBytes stable=$isStable durationMs=${durationMillis ?? 0}',
+      );
+
+      if (isStable && durationMillis != null && durationMillis > 0) {
+        return RecordingFileReadiness(
+          sizeBytes: sizeBytes,
+          durationSeconds: (durationMillis / 1000).ceil(),
+        );
+      }
+
+      previousSize = sizeBytes;
+      if (attempt < maxAttempts) {
+        await Future<void>.delayed(retryDelay);
+      }
+    }
+
+    return null;
+  }
+}
+
 class HttpRecordingUploader implements RecordingUploader {
   static const Duration _uploadTimeout = Duration(minutes: 2);
 
@@ -99,17 +164,20 @@ class HttpRecordingUploader implements RecordingUploader {
   final http.Client _client;
   final RecordingUploadSettings _settings;
   final ApiCredentialProvider _credentialProvider;
+  final RecordingFileInspector _fileInspector;
 
   HttpRecordingUploader({
     Uri? endpoint,
     http.Client? client,
     RecordingUploadSettings? settings,
     ApiCredentialProvider? credentialProvider,
+    RecordingFileInspector? fileInspector,
   }) : _endpointOverride = endpoint,
        _client = client ?? http.Client(),
        _settings = settings ?? RecordingUploadSettings(),
        _credentialProvider =
-           credentialProvider ?? SecureAgentCredentialManager();
+           credentialProvider ?? SecureAgentCredentialManager(),
+       _fileInspector = fileInspector ?? DeviceRecordingFileInspector();
 
   @override
   bool get isConfigured => true;
@@ -147,6 +215,26 @@ class HttpRecordingUploader implements RecordingUploader {
         'The recording file no longer exists on this phone.',
       );
     }
+    if (_isAppMicrophoneRecording(recording.path)) {
+      throw const RecordingUploadException(
+        'This is an app microphone recording, not the phone dialer recording. '
+        'It remains pending.',
+      );
+    }
+
+    final readiness = await _fileInspector.waitUntilReady(call.audioPath);
+    if (readiness == null) {
+      throw const RecordingUploadException(
+        'The recording is empty or still being finalized. It remains pending.',
+      );
+    }
+
+    final durationSeconds = readiness.durationSeconds;
+    if (durationSeconds <= 0) {
+      throw const RecordingUploadException(
+        'The recording duration is not ready. It remains pending.',
+      );
+    }
 
     try {
       final callStartedAt = DateTime.tryParse(call.createdAt);
@@ -161,7 +249,8 @@ class HttpRecordingUploader implements RecordingUploader {
         'RECORDING_UPLOAD: POST $endpoint '
         'session=${call.sessionId} customer=$normalizedCustomerId '
         'agent=${agentEmail?.trim().isNotEmpty == true ? agentEmail!.trim() : "(none)"} '
-        'file=${recording.path.split(Platform.pathSeparator).last}',
+        'file=${recording.path.split(Platform.pathSeparator).last} '
+        'bytes=${readiness.sizeBytes} duration=$durationSeconds',
       );
 
       final request = http.MultipartRequest('POST', endpoint)
@@ -176,7 +265,7 @@ class HttpRecordingUploader implements RecordingUploader {
           'mobile_no': call.phoneNumber,
           'call_date': _formatDate(localCallStartedAt),
           'call_time': _formatTime(localCallStartedAt),
-          'duration_seconds': '${call.duration}',
+          'duration_seconds': '$durationSeconds',
           'call_type': call.callType,
           if (agentEmail != null && agentEmail.trim().isNotEmpty)
             'agent_username': agentEmail.trim(),
@@ -256,6 +345,11 @@ class HttpRecordingUploader implements RecordingUploader {
     }
   }
 
+  bool _isAppMicrophoneRecording(String filePath) {
+    final normalizedPath = filePath.replaceAll('\\', '/').toLowerCase();
+    return normalizedPath.contains('/app_flutter/recordings/');
+  }
+
   Future<ApiCredentials?> _credentialsForAgent(String? agentEmail) async {
     final normalizedEmail = agentEmail?.trim().toLowerCase() ?? '';
     final savedCredentials = await _credentialProvider.read();
@@ -333,6 +427,15 @@ class HttpRecordingUploader implements RecordingUploader {
         return MediaType('audio', 'mp4');
       case 'wav':
         return MediaType('audio', 'wav');
+      case 'aac':
+        return MediaType('audio', 'aac');
+      case 'amr':
+        return MediaType('audio', 'amr');
+      case '3gp':
+        return MediaType('audio', '3gpp');
+      case 'ogg':
+      case 'opus':
+        return MediaType('audio', 'ogg');
       default:
         return MediaType('application', 'octet-stream');
     }

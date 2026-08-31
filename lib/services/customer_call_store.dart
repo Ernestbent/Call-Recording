@@ -8,6 +8,7 @@ import 'package:calls_recording/repository/call_repository.dart';
 import 'package:calls_recording/services/erpnext_customer_service.dart';
 import 'package:calls_recording/services/recording_upload_service.dart';
 import 'package:calls_recording/services/service_starter.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -29,7 +30,26 @@ class RecordingBatchUploadResult {
   });
 }
 
+class _PendingRecordingUpload {
+  final CustomerContact customer;
+  final CallRecordingFile recording;
+  final CallModel call;
+
+  const _PendingRecordingUpload({
+    required this.customer,
+    required this.recording,
+    required this.call,
+  });
+}
+
 class CustomerCallStore extends ChangeNotifier {
+  static const List<Duration> _defaultAutomaticUploadRetryDelays = [
+    Duration(seconds: 30),
+    Duration(minutes: 1),
+    Duration(minutes: 2),
+    Duration(minutes: 5),
+    Duration(minutes: 15),
+  ];
   static const Duration _recordingWindowStartOffset = Duration(seconds: 30);
   static const Duration _recordingWindowDuration = Duration(minutes: 2);
   static const Duration _duplicateCallTolerance = Duration(seconds: 15);
@@ -48,20 +68,43 @@ class CustomerCallStore extends ChangeNotifier {
     CallPersistence? callPersistence,
     DraftPaymentCustomerSource? customerSource,
     RecordingUploader? recordingUploader,
+    List<Duration> automaticUploadRetryDelays =
+        _defaultAutomaticUploadRetryDelays,
+    Stream<List<ConnectivityResult>>? connectivityChanges,
     List<CustomerContact> initialCustomers = const [],
   }) : _callPersistence = callPersistence ?? CallRepository(),
        _customerSource = customerSource ?? ErpNextCustomerService(),
        _recordingUploader = recordingUploader ?? HttpRecordingUploader(),
+       _automaticUploadRetryDelays = List.unmodifiable(
+         automaticUploadRetryDelays,
+       ),
        _customers = List<CustomerContact>.from(initialCustomers) {
+    if (_automaticUploadRetryDelays.isEmpty) {
+      throw ArgumentError.value(
+        automaticUploadRetryDelays,
+        'automaticUploadRetryDelays',
+        'At least one retry delay is required.',
+      );
+    }
     initializePlaybackEvents();
+    _connectivitySubscription =
+        (connectivityChanges ?? Connectivity().onConnectivityChanged).listen(
+          _handleConnectivityChanged,
+        );
   }
 
   final List<CustomerContact> _customers;
   final CallPersistence _callPersistence;
   final DraftPaymentCustomerSource _customerSource;
   final RecordingUploader _recordingUploader;
+  final List<Duration> _automaticUploadRetryDelays;
   final Map<String, RecordingUploadState> _recordingUploadStates = {};
+  final Map<String, Timer> _automaticUploadRetryTimers = {};
+  final Map<String, int> _automaticUploadRetryAttempts = {};
+  final Map<String, _PendingRecordingUpload> _pendingRecordingUploads = {};
   final Set<String> _completedPaymentEntryIds = {};
+  StreamSubscription<List<ConnectivityResult>>? _connectivitySubscription;
+  bool? _wasDisconnected;
   ErpNextSession? _activeErpNextSession;
   String? _queuedPhoneNumber;
   String? _activePhoneNumber;
@@ -145,6 +188,7 @@ class CustomerCallStore extends ChangeNotifier {
       .length;
 
   void clearErpNextSession() {
+    _cancelAllAutomaticUploadRetries();
     _customerLoadGeneration++;
     _activeErpNextSession = null;
     _customers.clear();
@@ -1042,6 +1086,7 @@ class CustomerCallStore extends ChangeNotifier {
       await _markPaymentEntriesCompleted(customer);
       _recordingUploadStates[recording.filePath] =
           RecordingUploadState.uploaded;
+      _clearAutomaticUploadRetry(recording.filePath);
       _lastRecordingUploadError = null;
       debugPrint('RECORDING_UPLOAD: uploaded session=${call.sessionId}');
       _notifyListeners();
@@ -1053,14 +1098,185 @@ class CustomerCallStore extends ChangeNotifier {
         'RECORDING_UPLOAD: failed session=${call.sessionId} '
         'reason=${error.message}',
       );
+      _scheduleAutomaticUploadRetry(
+        customer: customer,
+        recording: recording,
+        call: call,
+      );
     } catch (_) {
       _recordingUploadStates[recording.filePath] = RecordingUploadState.failed;
       _lastRecordingUploadError =
           'Could not upload the recording. It remains pending.';
       debugPrint('RECORDING_UPLOAD: failed session=${call.sessionId}');
+      _scheduleAutomaticUploadRetry(
+        customer: customer,
+        recording: recording,
+        call: call,
+      );
     }
     _notifyListeners();
     return false;
+  }
+
+  void _scheduleAutomaticUploadRetry({
+    required CustomerContact customer,
+    required CallRecordingFile recording,
+    required CallModel call,
+  }) {
+    if (recordingUploadState(recording) == RecordingUploadState.uploaded ||
+        _activeErpNextSession == null) {
+      return;
+    }
+
+    final filePath = recording.filePath;
+    final attempt = _automaticUploadRetryAttempts[filePath] ?? 0;
+    final delayIndex = attempt < _automaticUploadRetryDelays.length
+        ? attempt
+        : _automaticUploadRetryDelays.length - 1;
+    final delay = _automaticUploadRetryDelays[delayIndex];
+
+    _pendingRecordingUploads[filePath] = _PendingRecordingUpload(
+      customer: customer,
+      recording: recording,
+      call: call,
+    );
+    if (_wasDisconnected == true) {
+      _cancelAutomaticUploadRetryTimer(filePath);
+      debugPrint(
+        'RECORDING_UPLOAD: offline; upload paused '
+        'session=${call.sessionId}',
+      );
+      return;
+    }
+
+    _automaticUploadRetryAttempts[filePath] = attempt + 1;
+    _cancelAutomaticUploadRetryTimer(filePath);
+    debugPrint(
+      'RECORDING_UPLOAD: retry scheduled in '
+      '${delay.inSeconds}s attempt=${attempt + 1} session=${call.sessionId}',
+    );
+    _automaticUploadRetryTimers[filePath] = Timer(delay, () {
+      _automaticUploadRetryTimers.remove(filePath);
+      unawaited(
+        _retryMatchedRecording(
+          customer: customer,
+          recording: recording,
+          call: call,
+        ),
+      );
+    });
+  }
+
+  Future<void> _retryMatchedRecording({
+    required CustomerContact customer,
+    required CallRecordingFile recording,
+    required CallModel call,
+  }) async {
+    if (_activeErpNextSession == null ||
+        recordingUploadState(recording) == RecordingUploadState.uploaded) {
+      return;
+    }
+
+    final customerId = customer.erpNextCustomerId;
+    final currentCustomer =
+        (customerId == null ? null : _customerForErpNextId(customerId)) ??
+        _customerForPhone(customer.phoneNumber);
+    if (currentCustomer == null) {
+      _clearAutomaticUploadRetry(recording.filePath);
+      return;
+    }
+
+    debugPrint('RECORDING_UPLOAD: automatic retry session=${call.sessionId}');
+    _updateCustomer(
+      currentCustomer.phoneNumber,
+      (current) =>
+          current.copyWith(statusLabel: 'Retrying recording upload...'),
+    );
+    final uploaded = await _uploadMatchedRecording(
+      customer: currentCustomer,
+      recording: recording,
+      call: call,
+    );
+    _updateCustomer(
+      currentCustomer.phoneNumber,
+      (current) => current.copyWith(
+        statusLabel: uploaded
+            ? 'Recording uploaded'
+            : 'Recording saved; automatic retry pending',
+      ),
+    );
+  }
+
+  void _handleConnectivityChanged(List<ConnectivityResult> results) {
+    final isConnected = results.any(
+      (result) => result != ConnectivityResult.none,
+    );
+    final connectivityWasLost = _wasDisconnected == true;
+    _wasDisconnected = !isConnected;
+
+    if (!isConnected) {
+      for (final timer in _automaticUploadRetryTimers.values) {
+        timer.cancel();
+      }
+      _automaticUploadRetryTimers.clear();
+      if (_pendingRecordingUploads.isNotEmpty) {
+        debugPrint(
+          'RECORDING_UPLOAD: connectivity lost; paused '
+          '${_pendingRecordingUploads.length} pending upload(s)',
+        );
+      }
+      return;
+    }
+
+    if (!connectivityWasLost || _activeErpNextSession == null) {
+      return;
+    }
+
+    final pendingUploads = List<_PendingRecordingUpload>.from(
+      _pendingRecordingUploads.values,
+    );
+    if (pendingUploads.isEmpty) return;
+
+    debugPrint(
+      'RECORDING_UPLOAD: connectivity restored; retrying '
+      '${pendingUploads.length} pending recording(s)',
+    );
+    for (final pending in pendingUploads) {
+      _cancelAutomaticUploadRetryTimer(pending.recording.filePath);
+      unawaited(
+        _retryMatchedRecording(
+          customer: pending.customer,
+          recording: pending.recording,
+          call: pending.call,
+        ),
+      );
+    }
+  }
+
+  void _cancelAutomaticUploadRetryTimer(String filePath) {
+    _automaticUploadRetryTimers.remove(filePath)?.cancel();
+  }
+
+  void _clearAutomaticUploadRetry(String filePath) {
+    _cancelAutomaticUploadRetryTimer(filePath);
+    _automaticUploadRetryAttempts.remove(filePath);
+    _pendingRecordingUploads.remove(filePath);
+  }
+
+  void _cancelAllAutomaticUploadRetries() {
+    for (final timer in _automaticUploadRetryTimers.values) {
+      timer.cancel();
+    }
+    _automaticUploadRetryTimers.clear();
+    _automaticUploadRetryAttempts.clear();
+    _pendingRecordingUploads.clear();
+  }
+
+  @override
+  void dispose() {
+    _cancelAllAutomaticUploadRetries();
+    unawaited(_connectivitySubscription?.cancel());
+    super.dispose();
   }
 
   Future<void> _markPaymentEntriesCompleted(CustomerContact customer) async {

@@ -4,6 +4,7 @@ import android.content.ContentUris
 import android.content.Intent
 import android.database.Cursor
 import android.media.AudioAttributes
+import android.media.MediaMetadataRetriever
 import android.media.MediaPlayer
 import android.net.Uri
 import android.provider.MediaStore
@@ -23,7 +24,16 @@ class MainActivity : FlutterActivity() {
 
     private val CHANNEL = "call_recorder_service"
     private val TAG = "CALL_RECORD_LOOKUP"
-    private val audioExtensions = setOf("mp3", "m4a", "wav", "aac")
+    private val audioExtensions = setOf(
+        "mp3",
+        "m4a",
+        "wav",
+        "aac",
+        "amr",
+        "3gp",
+        "ogg",
+        "opus"
+    )
     private lateinit var methodChannel: MethodChannel
     private var mediaPlayer: MediaPlayer? = null
     private var activeRecordingPath: String? = null
@@ -104,6 +114,20 @@ class MainActivity : FlutterActivity() {
                             }
                         }
                     }
+                    "getRecordingDurationMillis" -> {
+                        val filePath = call.argument<String>("filePath")
+                        if (filePath.isNullOrBlank()) {
+                            result.error("MISSING_ARGUMENT", "filePath is required", null)
+                            return@setMethodCallHandler
+                        }
+
+                        recordingLookupExecutor.execute {
+                            val durationMillis = getRecordingDurationMillis(filePath)
+                            runOnUiThread {
+                                result.success(durationMillis)
+                            }
+                        }
+                    }
                     "openDialer" -> {
                         val phoneNumber = call.argument<String>("phoneNumber")
 
@@ -138,6 +162,28 @@ class MainActivity : FlutterActivity() {
                     else -> result.notImplemented()
                 }
             }
+    }
+
+    private fun getRecordingDurationMillis(filePath: String): Long? {
+        val retriever = MediaMetadataRetriever()
+        return try {
+            if (filePath.startsWith("content://")) {
+                retriever.setDataSource(this, Uri.parse(filePath))
+            } else {
+                val file = File(filePath)
+                if (!file.exists() || file.length() <= 0L) return null
+                retriever.setDataSource(file.absolutePath)
+            }
+
+            retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+                ?.toLongOrNull()
+                ?.takeIf { it > 0L }
+        } catch (error: Exception) {
+            Log.w(TAG, "Could not read recording duration path=$filePath", error)
+            null
+        } finally {
+            retriever.release()
+        }
     }
 
     private fun findRecentCallRecording(
@@ -229,7 +275,7 @@ class MainActivity : FlutterActivity() {
                 directory
                     .walkTopDown()
                     .onFail { _, _ -> }
-                    .filter { file -> file.isFile && isSupportedAudio(file) }
+                    .filter(::isUsableRecordingFile)
                     .forEach { file ->
                         val extractedPhone = extractPhoneNumberFromPath(file.absolutePath)
                         if (!phoneNumbersMatch(normalizedTarget, extractedPhone)) {
@@ -301,7 +347,8 @@ class MainActivity : FlutterActivity() {
             MediaStore.Audio.Media._ID,
             MediaStore.Audio.Media.DISPLAY_NAME,
             MediaStore.Audio.Media.DATE_MODIFIED,
-            MediaStore.Audio.Media.RELATIVE_PATH
+            MediaStore.Audio.Media.RELATIVE_PATH,
+            MediaStore.MediaColumns.SIZE
         )
 
         val selection = mediaStoreRelativePaths.joinToString(" OR ") {
@@ -325,6 +372,7 @@ class MainActivity : FlutterActivity() {
                 nameColumn = MediaStore.Audio.Media.DISPLAY_NAME,
                 modifiedColumn = MediaStore.Audio.Media.DATE_MODIFIED,
                 relativePathColumn = MediaStore.Audio.Media.RELATIVE_PATH,
+                sizeColumn = MediaStore.MediaColumns.SIZE,
                 sourceLabel = "Audio.Media"
             )
         }
@@ -336,7 +384,8 @@ class MainActivity : FlutterActivity() {
             MediaStore.Files.FileColumns.DISPLAY_NAME,
             MediaStore.Files.FileColumns.DATE_MODIFIED,
             MediaStore.Files.FileColumns.RELATIVE_PATH,
-            MediaStore.Files.FileColumns.MIME_TYPE
+            MediaStore.Files.FileColumns.MIME_TYPE,
+            MediaStore.Files.FileColumns.SIZE
         )
 
         val selection = mediaStoreRelativePaths.joinToString(" OR ") {
@@ -360,6 +409,7 @@ class MainActivity : FlutterActivity() {
                 nameColumn = MediaStore.Files.FileColumns.DISPLAY_NAME,
                 modifiedColumn = MediaStore.Files.FileColumns.DATE_MODIFIED,
                 relativePathColumn = MediaStore.Files.FileColumns.RELATIVE_PATH,
+                sizeColumn = MediaStore.Files.FileColumns.SIZE,
                 sourceLabel = "Files"
             )
         }
@@ -372,12 +422,14 @@ class MainActivity : FlutterActivity() {
         nameColumn: String,
         modifiedColumn: String,
         relativePathColumn: String,
+        sizeColumn: String,
         sourceLabel: String
     ): List<RecordingCandidate> {
         val idIndex = cursor.getColumnIndexOrThrow(idColumn)
         val nameIndex = cursor.getColumnIndexOrThrow(nameColumn)
         val dateModifiedIndex = cursor.getColumnIndexOrThrow(modifiedColumn)
         val relativePathIndex = cursor.getColumnIndexOrThrow(relativePathColumn)
+        val sizeIndex = cursor.getColumnIndexOrThrow(sizeColumn)
         val results = mutableListOf<RecordingCandidate>()
 
         while (cursor.moveToNext()) {
@@ -385,6 +437,7 @@ class MainActivity : FlutterActivity() {
             if (!isSupportedAudio(displayName)) {
                 continue
             }
+            if (cursor.getLong(sizeIndex) <= 0L) continue
 
             val id = cursor.getLong(idIndex)
             val lastModified = cursor.getLong(dateModifiedIndex) * 1000L
@@ -420,7 +473,7 @@ class MainActivity : FlutterActivity() {
                 directory
                     .walkTopDown()
                     .onFail { _, _ -> }
-                    .filter { file -> file.isFile && isSupportedAudio(file) }
+                    .filter(::isUsableRecordingFile)
                     .forEach { file ->
                         val extractedPhone = extractPhoneNumberFromPath(file.absolutePath)
                         if (!phoneNumbersMatch(normalizedTarget, extractedPhone)) {
@@ -459,7 +512,7 @@ class MainActivity : FlutterActivity() {
                 directory
                     .walkTopDown()
                     .onFail { _, _ -> }
-                    .filter { file -> file.isFile && isSupportedAudio(file) }
+                    .filter(::isUsableRecordingFile)
                     .forEach { file ->
                         val lastModified = file.lastModified()
                         if (lastModified > bestModifiedTime) {
@@ -489,7 +542,8 @@ class MainActivity : FlutterActivity() {
             MediaStore.Audio.Media._ID,
             MediaStore.Audio.Media.DISPLAY_NAME,
             MediaStore.Audio.Media.DATE_MODIFIED,
-            MediaStore.Audio.Media.RELATIVE_PATH
+            MediaStore.Audio.Media.RELATIVE_PATH,
+            MediaStore.MediaColumns.SIZE
         )
 
         val selection = mediaStoreRelativePaths.joinToString(" OR ") {
@@ -526,6 +580,7 @@ class MainActivity : FlutterActivity() {
         val idIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
         val nameIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DISPLAY_NAME)
         val dateModifiedIndex = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_MODIFIED)
+        val sizeIndex = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.SIZE)
 
         var bestMatch: RecordingCandidate? = null
         var bestDelta = Long.MAX_VALUE
@@ -536,6 +591,7 @@ class MainActivity : FlutterActivity() {
             if (!isSupportedAudio(displayName)) {
                 continue
             }
+            if (cursor.getLong(sizeIndex) <= 0L) continue
 
             val extractedPhone = extractPhoneNumberFromFileName(displayName)
             val hasPhoneMatch = normalizedTarget == null ||
@@ -595,7 +651,7 @@ class MainActivity : FlutterActivity() {
                 directory
                     .walkTopDown()
                     .onFail { _, _ -> }
-                    .filter { file -> file.isFile && isSupportedAudio(file) }
+                    .filter(::isUsableRecordingFile)
                     .forEach { file ->
                         val lastModified = file.lastModified()
                         val extractedPhone = extractPhoneNumberFromFileName(file.name)
@@ -631,6 +687,10 @@ class MainActivity : FlutterActivity() {
     private fun isSupportedAudio(file: File): Boolean {
         val extension = file.extension.lowercase()
         return extension in audioExtensions
+    }
+
+    private fun isUsableRecordingFile(file: File): Boolean {
+        return file.isFile && file.length() > 0L && isSupportedAudio(file)
     }
 
     private fun isSupportedAudio(fileName: String): Boolean {
@@ -729,9 +789,6 @@ class MainActivity : FlutterActivity() {
             "/storage/emulated/0/Music/PhoneRecord/"
         )
 
-        filesDir.parentFile?.let { appDataRoot ->
-            directories.add(File(appDataRoot, "app_flutter/recordings").absolutePath)
-        }
         getExternalFilesDir(null)?.absolutePath?.let { directories.add(it) }
         getExternalFilesDir(null)?.let { externalRoot ->
             directories.add(File(externalRoot, "recordings").absolutePath)

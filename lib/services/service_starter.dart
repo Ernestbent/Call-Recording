@@ -149,6 +149,22 @@ class ServiceStarter {
     }
   }
 
+  static Future<int?> getRecordingDurationMillis(String filePath) async {
+    try {
+      final duration = await platform.invokeMethod<num>(
+        'getRecordingDurationMillis',
+        {'filePath': filePath},
+      );
+      final durationMillis = duration?.toInt();
+      return durationMillis != null && durationMillis > 0
+          ? durationMillis
+          : null;
+    } catch (error) {
+      debugPrint('Failed to read recording duration: $error');
+      return null;
+    }
+  }
+
   static Future<bool> openDialer(String phoneNumber) async {
     try {
       final result = await platform.invokeMethod<bool>('openDialer', {
