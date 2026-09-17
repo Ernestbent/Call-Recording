@@ -5,7 +5,16 @@ abstract class CallPersistence {
 
   Future<Map<String, dynamic>?> getCall(String sessionId);
 
+  Future<Map<String, dynamic>?> getCallByAudioPath(String audioPath);
+
   Future<void> updateStatus(String sessionId, String status);
+
+  Future<void> deleteCalls(
+    Iterable<String> sessionIds, {
+    Iterable<String> audioPaths = const [],
+  }) async {}
+
+  Future<List<Map<String, dynamic>>> getAllCalls() async => const [];
 }
 
 class CallRepository implements CallPersistence {
@@ -16,6 +25,7 @@ class CallRepository implements CallPersistence {
     await db.insertCall(call);
   }
 
+  @override
   Future<List<Map<String, dynamic>>> getAllCalls() async {
     return await db.getAllCalls();
   }
@@ -30,7 +40,20 @@ class CallRepository implements CallPersistence {
   }
 
   @override
+  Future<Map<String, dynamic>?> getCallByAudioPath(String audioPath) {
+    return db.getCallByAudioPath(audioPath);
+  }
+
+  @override
   Future<void> updateStatus(String sessionId, String status) async {
     await db.updateCallStatus(sessionId, status);
+  }
+
+  @override
+  Future<void> deleteCalls(
+    Iterable<String> sessionIds, {
+    Iterable<String> audioPaths = const [],
+  }) async {
+    await db.deleteCalls(sessionIds: sessionIds, audioPaths: audioPaths);
   }
 }

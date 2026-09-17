@@ -70,6 +70,18 @@ class CallDatabase {
     return rows.isEmpty ? null : rows.first;
   }
 
+  Future<Map<String, dynamic>?> getCallByAudioPath(String audioPath) async {
+    final db = await database;
+    final rows = await db.query(
+      'calls',
+      where: 'audio_path = ?',
+      whereArgs: [audioPath],
+      orderBy: "CASE status WHEN 'uploaded' THEN 0 ELSE 1 END, id DESC",
+      limit: 1,
+    );
+    return rows.isEmpty ? null : rows.first;
+  }
+
   //  UPDATE STATUS
   Future<int> updateCallStatus(String sessionId, String status) async {
     final db = await database;
@@ -79,5 +91,32 @@ class CallDatabase {
       where: 'session_id = ?',
       whereArgs: [sessionId],
     );
+  }
+
+  Future<void> deleteCalls({
+    required Iterable<String> sessionIds,
+    required Iterable<String> audioPaths,
+  }) async {
+    final ids = sessionIds.toSet().toList(growable: false);
+    final paths = audioPaths.toSet().toList(growable: false);
+    if (ids.isEmpty && paths.isEmpty) return;
+
+    final db = await database;
+    await db.transaction((transaction) async {
+      for (final sessionId in ids) {
+        await transaction.delete(
+          'calls',
+          where: 'session_id = ?',
+          whereArgs: [sessionId],
+        );
+      }
+      for (final audioPath in paths) {
+        await transaction.delete(
+          'calls',
+          where: 'audio_path = ?',
+          whereArgs: [audioPath],
+        );
+      }
+    });
   }
 }

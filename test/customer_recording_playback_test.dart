@@ -1,5 +1,6 @@
 import 'package:calls_recording/services/customer_call_store.dart';
 import 'package:calls_recording/db/call_model.dart';
+import 'package:calls_recording/models/call_recording_file.dart';
 import 'package:calls_recording/models/customer_contact.dart';
 import 'package:calls_recording/repository/call_repository.dart';
 import 'package:calls_recording/services/recording_upload_service.dart';
@@ -9,6 +10,117 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  test('recordings from before the latest draft payment are ignored', () async {
+    SharedPreferences.setMockInitialValues({});
+    final draftCreatedAt = DateTime(2026, 7, 24, 12);
+    final oldCallStartedAt = draftCreatedAt.subtract(const Duration(days: 2));
+    final currentCallStartedAt = draftCreatedAt.add(const Duration(minutes: 5));
+    final oldRecording = CallRecordingFile(
+      filePath: '/recordings/old-call.m4a',
+      fileName: 'old-call.m4a',
+      lastModifiedTime: oldCallStartedAt.add(const Duration(seconds: 30)),
+    );
+    final currentRecording = CallRecordingFile(
+      filePath: '/recordings/current-call.m4a',
+      fileName: 'current-call.m4a',
+      lastModifiedTime: currentCallStartedAt.add(const Duration(seconds: 30)),
+    );
+    final store = CustomerCallStore(
+      initialCustomers: [
+        CustomerContact(
+          name: 'Test Customer',
+          phoneNumber: '0772835195',
+          latestPaymentEntryCreatedAt: draftCreatedAt,
+          subtitle: 'Draft payment entry',
+          statusLabel: 'Ready to call',
+          lastCallStartedAt: oldCallStartedAt,
+        ),
+      ],
+    );
+    addTearDown(store.dispose);
+
+    expect(
+      store.selectBestRecordingForPhone('0772835195', [oldRecording]),
+      isNull,
+    );
+    expect(
+      store.selectBestRecordingForPhone('0772835195', [
+        oldRecording,
+        currentRecording,
+      ]),
+      same(currentRecording),
+    );
+
+    await store.markCallStarted('0772835195', startedAt: currentCallStartedAt);
+
+    expect(
+      store.selectBestRecordingForPhone('0772835195', [
+        oldRecording,
+        currentRecording,
+      ]),
+      same(currentRecording),
+    );
+  });
+
+  test(
+    'recording after draft uploads when phone-state timestamp is missing',
+    () async {
+      SharedPreferences.setMockInitialValues({});
+      final draftCreatedAt = DateTime(2026, 7, 24, 12);
+      final recordingStartedAt = draftCreatedAt.add(const Duration(minutes: 5));
+      final recordingEndedAt = recordingStartedAt.add(
+        const Duration(seconds: 45),
+      );
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(ServiceStarter.platform, (call) async {
+            if (call.method == 'findRecordingsForPhone') {
+              return [
+                {
+                  'filePath': '/recordings/current-call.m4a',
+                  'fileName': 'call_20260724120500.m4a',
+                  'lastModifiedTime': recordingEndedAt.millisecondsSinceEpoch,
+                },
+              ];
+            }
+            return null;
+          });
+      addTearDown(() {
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(ServiceStarter.platform, null);
+      });
+      final persistence = _FakeCallPersistence();
+      final uploader = _FakeRecordingUploader();
+      final store = CustomerCallStore(
+        callPersistence: persistence,
+        recordingUploader: uploader,
+        initialCustomers: [
+          CustomerContact(
+            erpNextCustomerId: 'CUST-TEST-001',
+            name: 'Test Customer',
+            phoneNumber: '0772835195',
+            latestPaymentEntryCreatedAt: draftCreatedAt,
+            subtitle: 'Draft payment entry',
+            statusLabel: 'Ready to call',
+          ),
+        ],
+      );
+      addTearDown(store.dispose);
+
+      final matched = await store.fetchRecordingsForAllCustomers();
+
+      expect(matched, 1);
+      expect(uploader.uploadedCalls, hasLength(1));
+      expect(
+        uploader.uploadedCalls.single.createdAt,
+        '2026-07-24T12:05:00.000',
+      );
+      expect(
+        store.customers.single.latestRecording?.filePath,
+        '/recordings/current-call.m4a',
+      );
+    },
+  );
 
   test('only the best recording for an app-started call is uploaded', () async {
     String? playedPath;
@@ -77,11 +189,10 @@ void main() {
         ),
       ],
     );
-    store.markCallStarted(
+    await store.markCallStarted(
       store.customers.first.phoneNumber,
       startedAt: callStartedAt,
     );
-    await Future<void>.delayed(Duration.zero);
 
     final matchedCustomers = await store.fetchRecordingsForAllCustomers();
 
@@ -165,9 +276,35 @@ class _FakeCallPersistence implements CallPersistence {
   final List<Map<String, dynamic>> savedCalls = [];
 
   @override
+  Future<void> deleteCalls(
+    Iterable<String> sessionIds, {
+    Iterable<String> audioPaths = const [],
+  }) async {
+    final ids = sessionIds.toSet();
+    final paths = audioPaths.toSet();
+    savedCalls.removeWhere(
+      (call) =>
+          ids.contains(call['session_id']) ||
+          paths.contains(call['audio_path']),
+    );
+  }
+
+  @override
+  Future<List<Map<String, dynamic>>> getAllCalls() async =>
+      List.unmodifiable(savedCalls);
+
+  @override
   Future<Map<String, dynamic>?> getCall(String sessionId) async {
     for (final call in savedCalls.reversed) {
       if (call['session_id'] == sessionId) return call;
+    }
+    return null;
+  }
+
+  @override
+  Future<Map<String, dynamic>?> getCallByAudioPath(String audioPath) async {
+    for (final call in savedCalls.reversed) {
+      if (call['audio_path'] == audioPath) return call;
     }
     return null;
   }

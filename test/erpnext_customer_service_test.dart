@@ -136,6 +136,53 @@ void main() {
     },
   );
 
+  test(
+    'store restores cached draft customers when ERPNext is unavailable',
+    () async {
+      SharedPreferences.setMockInitialValues({});
+      final firstStore = CustomerCallStore(
+        customerSource: _FakeDraftPaymentCustomerSource(),
+        draftCustomerRefreshInterval: const Duration(hours: 1),
+        connectivityChanges: const Stream.empty(),
+      );
+      await firstStore.loadDraftPaymentCustomers(session);
+      firstStore.dispose();
+
+      final offlineStore = CustomerCallStore(
+        customerSource: _FailingDraftPaymentCustomerSource(),
+        draftCustomerRefreshInterval: const Duration(hours: 1),
+        connectivityChanges: const Stream.empty(),
+      );
+      addTearDown(offlineStore.dispose);
+
+      final count = await offlineStore.loadDraftPaymentCustomers(session);
+
+      expect(count, 1);
+      expect(offlineStore.customers.single.erpNextCustomerId, 'CUST-A');
+      expect(offlineStore.customers.single.paymentEntryIds, ['PAY-1', 'PAY-2']);
+    },
+  );
+
+  test(
+    'store refreshes draft customers periodically without overlap',
+    () async {
+      SharedPreferences.setMockInitialValues({});
+      final source = _CountingDraftPaymentCustomerSource();
+      final store = CustomerCallStore(
+        customerSource: source,
+        draftCustomerRefreshInterval: const Duration(milliseconds: 15),
+        connectivityChanges: const Stream.empty(),
+      );
+      addTearDown(store.dispose);
+
+      await store.loadDraftPaymentCustomers(session);
+      await Future<void>.delayed(const Duration(milliseconds: 55));
+
+      expect(source.requestCount, greaterThanOrEqualTo(2));
+      expect(source.maximumConcurrentRequests, 1);
+    },
+  );
+
   test('reports ERPNext permission errors', () async {
     final service = ErpNextCustomerService(
       client: MockClient((_) async => http.Response('Forbidden', 403)),
@@ -170,5 +217,35 @@ class _FakeDraftPaymentCustomerSource implements DraftPaymentCustomerSource {
         latestPaymentEntryCreatedAt: DateTime(2026, 8, 3, 10, 30),
       ),
     ];
+  }
+}
+
+class _FailingDraftPaymentCustomerSource implements DraftPaymentCustomerSource {
+  @override
+  Future<List<DraftPaymentCustomer>> fetchDraftPaymentCustomers(
+    ErpNextSession session,
+  ) {
+    throw const ErpNextCustomerFetchException('ERPNext is unavailable.');
+  }
+}
+
+class _CountingDraftPaymentCustomerSource
+    extends _FakeDraftPaymentCustomerSource {
+  int requestCount = 0;
+  int concurrentRequests = 0;
+  int maximumConcurrentRequests = 0;
+
+  @override
+  Future<List<DraftPaymentCustomer>> fetchDraftPaymentCustomers(
+    ErpNextSession session,
+  ) async {
+    requestCount++;
+    concurrentRequests++;
+    if (concurrentRequests > maximumConcurrentRequests) {
+      maximumConcurrentRequests = concurrentRequests;
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 5));
+    concurrentRequests--;
+    return super.fetchDraftPaymentCustomers(session);
   }
 }

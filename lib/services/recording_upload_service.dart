@@ -256,8 +256,7 @@ class HttpRecordingUploader implements RecordingUploader {
       final request = http.MultipartRequest('POST', endpoint)
         ..headers.addAll({
           'Accept': 'application/json',
-          'Authorization':
-              'token ${credentials.apiKey}:${credentials.apiSecret}',
+          'Authorization': credentials.authorizationHeader,
         })
         ..fields.addAll({
           'device_local_id': call.sessionId,
@@ -267,8 +266,7 @@ class HttpRecordingUploader implements RecordingUploader {
           'call_time': _formatTime(localCallStartedAt),
           'duration_seconds': '$durationSeconds',
           'call_type': call.callType,
-          if (agentEmail != null && agentEmail.trim().isNotEmpty)
-            'agent_username': agentEmail.trim(),
+          'agent_username': credentials.email,
         })
         ..files.add(
           await http.MultipartFile.fromPath(
@@ -352,40 +350,45 @@ class HttpRecordingUploader implements RecordingUploader {
 
   Future<ApiCredentials?> _credentialsForAgent(String? agentEmail) async {
     final normalizedEmail = agentEmail?.trim().toLowerCase() ?? '';
-    final savedCredentials = await _credentialProvider.read();
+    if (normalizedEmail.isEmpty) {
+      throw const RecordingUploadException(
+        'The signed-in ERPNext user is missing. Sign in again.',
+      );
+    }
 
-    if (normalizedEmail.isNotEmpty &&
-        _credentialProvider is AgentCredentialManager) {
+    if (_credentialProvider is AgentCredentialManager) {
       try {
         debugPrint(
           'RECORDING_UPLOAD: activating credentials for $normalizedEmail',
         );
-        return await _credentialProvider.activateForEmail(normalizedEmail);
+        final credentials = await _credentialProvider.activateForEmail(
+          normalizedEmail,
+        );
+        return _validatedCredentials(credentials, normalizedEmail);
       } on AgentCredentialException catch (error) {
         throw RecordingUploadException(error.message);
       }
     }
 
-    if (savedCredentials != null &&
-        (normalizedEmail.isEmpty ||
-            savedCredentials.belongsTo(normalizedEmail))) {
-      debugPrint(
-        'RECORDING_UPLOAD: using saved credentials '
-        'agent=${savedCredentials.email}',
-      );
-      return savedCredentials;
-    }
+    final savedCredentials = await _credentialProvider.read();
+    return _validatedCredentials(savedCredentials, normalizedEmail);
+  }
 
-    if (normalizedEmail.isEmpty ||
-        _credentialProvider is! AgentCredentialManager) {
-      debugPrint(
-        'RECORDING_UPLOAD: using saved credentials without agent match '
-        'agent=${savedCredentials?.email ?? "(none)"}',
+  ApiCredentials _validatedCredentials(
+    ApiCredentials? credentials,
+    String normalizedEmail,
+  ) {
+    if (credentials == null || !credentials.isComplete) {
+      throw RecordingUploadException(
+        'No complete upload credentials are configured for $normalizedEmail.',
       );
-      return savedCredentials;
     }
-
-    return savedCredentials;
+    if (!credentials.belongsTo(normalizedEmail)) {
+      throw RecordingUploadException(
+        'Upload credentials do not belong to $normalizedEmail.',
+      );
+    }
+    return credentials;
   }
 
   static String _formatDate(DateTime value) {

@@ -1,5 +1,5 @@
 import 'package:calls_recording/services/customer_call_store.dart';
-import 'package:calls_recording/models/customer_contact.dart';
+import 'package:calls_recording/models/persisted_call_session.dart';
 import 'package:calls_recording/theme/app_theme.dart';
 import 'package:calls_recording/widgets/custom_bottom_nav.dart';
 import 'package:calls_recording/widgets/recent_calls.dart';
@@ -18,25 +18,13 @@ class HomeScreen extends StatelessWidget {
         child: AnimatedBuilder(
           animation: appState,
           builder: (context, _) {
-            final recentCustomers =
-                appState.customers
-                    .where(
-                      (customer) =>
-                          customer.lastCallEndedAt != null ||
-                          customer.latestRecording != null,
-                    )
-                    .toList()
-                  ..sort((a, b) {
-                    final aTime =
-                        a.lastCallEndedAt ??
-                        a.latestRecording?.lastModifiedTime ??
-                        DateTime.fromMillisecondsSinceEpoch(0);
-                    final bTime =
-                        b.lastCallEndedAt ??
-                        b.latestRecording?.lastModifiedTime ??
-                        DateTime.fromMillisecondsSinceEpoch(0);
-                    return bTime.compareTo(aTime);
-                  });
+            final recentCutoff = DateTime.now().subtract(
+              const Duration(days: 7),
+            );
+            final recentSessions = appState.callSessions
+                .where((session) => !session.startedAt.isBefore(recentCutoff))
+                .take(5)
+                .toList(growable: false);
 
             return ListView(
               padding: const EdgeInsets.fromLTRB(20, 22, 20, 28),
@@ -46,9 +34,9 @@ class HomeScreen extends StatelessWidget {
                 SectionLabel(
                   'Recent activity',
                   trailing: Text(
-                    recentCustomers.isEmpty
+                    recentSessions.isEmpty
                         ? 'No calls yet'
-                        : '${recentCustomers.length} total',
+                        : 'Latest ${recentSessions.length}',
                     style: const TextStyle(
                       color: AppColors.subtle,
                       fontSize: 12,
@@ -57,43 +45,38 @@ class HomeScreen extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 12),
-                if (recentCustomers.isEmpty)
+                if (recentSessions.isEmpty)
                   const _EmptyRecentState()
                 else
-                  ...recentCustomers
-                      .take(5)
-                      .map(
-                        (customer) => Padding(
-                          padding: const EdgeInsets.only(bottom: 12),
-                          child: RecentCalls(
-                            phoneNumber: customer.name,
-                            timeInfo: _buildRecentSubtitle(customer),
-                            hasRecording: customer.latestRecording != null,
-                            isPlaying:
-                                customer.latestRecording != null &&
-                                appState.isPlayingRecording(
-                                  customer.latestRecording!,
-                                ),
-                            onPlayTap: customer.latestRecording == null
-                                ? null
-                                : () async {
-                                    final didStart = await appState
-                                        .playRecording(
-                                          customer.latestRecording!,
-                                        );
-                                    if (!context.mounted || didStart) return;
+                  ...recentSessions.map(
+                    (session) => Padding(
+                      padding: const EdgeInsets.only(bottom: 12),
+                      child: RecentCalls(
+                        phoneNumber: session.customerName,
+                        timeInfo: _buildRecentSubtitle(session),
+                        hasRecording: session.recording != null,
+                        isPlaying:
+                            session.recording != null &&
+                            appState.isPlayingRecording(session.recording!),
+                        onPlayTap: session.recording == null
+                            ? null
+                            : () async {
+                                final didStart = await appState.playRecording(
+                                  session.recording!,
+                                );
+                                if (!context.mounted || didStart) return;
 
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      const SnackBar(
-                                        content: Text(
-                                          'Unable to play this recording.',
-                                        ),
-                                      ),
-                                    );
-                                  },
-                          ),
-                        ),
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text(
+                                      'Unable to play this recording.',
+                                    ),
+                                  ),
+                                );
+                              },
                       ),
+                    ),
+                  ),
               ],
             );
           },
@@ -107,21 +90,17 @@ class HomeScreen extends StatelessWidget {
     );
   }
 
-  static String _buildRecentSubtitle(CustomerContact customer) {
-    final callTime =
-        customer.lastCallStartedAt ??
-        customer.lastCallEndedAt ??
-        customer.latestRecording?.lastModifiedTime;
-
-    final timeLabel = callTime == null
-        ? customer.phoneNumber
-        : '${customer.phoneNumber} • ${_formatTime(callTime)}';
-
-    if (customer.latestRecording == null) {
-      return '$timeLabel • Waiting for matching recording';
-    }
-
-    return '$timeLabel • ${customer.latestRecording!.fileName}';
+  static String _buildRecentSubtitle(PersistedCallSession session) {
+    final timeLabel =
+        '${session.phoneNumber} • ${_formatTime(session.startedAt)}';
+    return switch (session.status) {
+      PersistedCallStatus.waitingForRecording =>
+        '$timeLabel • Waiting for recording',
+      PersistedCallStatus.recordingNotFound =>
+        '$timeLabel • Recording not found',
+      PersistedCallStatus.pendingUpload => '$timeLabel • Pending upload',
+      PersistedCallStatus.uploaded => '$timeLabel • Uploaded',
+    };
   }
 
   static String _formatTime(DateTime value) {

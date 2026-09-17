@@ -228,7 +228,7 @@ class CustomersScreen extends StatelessWidget {
                                 RecordingBatchUploadResult(failed: 0) =>
                                   'Uploaded ${result.uploaded} recording${result.uploaded == 1 ? '' : 's'}.',
                                 _ =>
-                                  'Uploaded ${result.uploaded} of ${result.attempted}. ${result.failed} recording${result.failed == 1 ? '' : 's'} remain pending.',
+                                  'Uploaded ${result.uploaded} of ${result.attempted}. ${result.failed} recording${result.failed == 1 ? '' : 's'} remain pending. ${appState.lastRecordingUploadError ?? ''}',
                               };
 
                               ScaffoldMessenger.of(

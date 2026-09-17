@@ -24,6 +24,8 @@ class ApiCredentials {
   bool get isComplete =>
       email.isNotEmpty && apiKey.isNotEmpty && apiSecret.isNotEmpty;
 
+  String get authorizationHeader => 'token $apiKey:$apiSecret';
+
   bool belongsTo(String userEmail) =>
       email.toLowerCase() == userEmail.trim().toLowerCase();
 }

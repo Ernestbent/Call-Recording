@@ -68,7 +68,10 @@ void main() {
     );
 
     await tester.pump(const Duration(milliseconds: 3300));
-    await tester.pumpAndSettle();
+    for (var frame = 0; frame < 20; frame++) {
+      await tester.pump(const Duration(milliseconds: 100));
+      if (find.text('RECORDINGS READY').evaluate().isNotEmpty) break;
+    }
 
     expect(find.text('RECORDINGS READY'), findsOneWidget);
     expect(find.text('Welcome Back'), findsNothing);
@@ -135,7 +138,10 @@ void main() {
     WidgetTester tester,
   ) async {
     final customerSource = _PendingDraftPaymentCustomerSource();
-    final appState = CustomerCallStore(customerSource: customerSource);
+    final appState = CustomerCallStore(
+      customerSource: customerSource,
+      automaticDraftCustomerRefreshEnabled: false,
+    );
 
     await tester.pumpWidget(
       MaterialApp(
@@ -444,7 +450,10 @@ class _PendingDraftPaymentCustomerSource implements DraftPaymentCustomerSource {
 }
 
 CustomerCallStore _testCustomerCallStore() {
-  return CustomerCallStore(customerSource: _EmptyDraftPaymentCustomerSource());
+  return CustomerCallStore(
+    customerSource: _EmptyDraftPaymentCustomerSource(),
+    automaticDraftCustomerRefreshEnabled: false,
+  );
 }
 
 ErpNextSession _testSession() {

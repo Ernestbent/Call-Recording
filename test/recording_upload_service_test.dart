@@ -137,6 +137,57 @@ void main() {
       capturedRequest.headers['authorization'],
       'token fresh-api-key:fresh-api-secret',
     );
+    expect(capturedRequest.body, contains('agent@example.com'));
+  });
+
+  test('rejects credentials belonging to a different signed-in user', () async {
+    final tempDirectory = await Directory.systemTemp.createTemp(
+      'recording-upload-user-match-test-',
+    );
+    final recording = File('${tempDirectory.path}/sample.mp3');
+    await recording.writeAsBytes([0x49, 0x44, 0x33, 0x04]);
+    addTearDown(() => tempDirectory.delete(recursive: true));
+
+    var requestWasSent = false;
+    final uploader = HttpRecordingUploader(
+      endpoint: Uri.parse('https://example.test/api/recordings'),
+      credentialProvider: _TestCredentialManager(
+        activated: const ApiCredentials(
+          email: 'other@example.com',
+          apiKey: 'other-key',
+          apiSecret: 'other-secret',
+        ),
+      ),
+      fileInspector: const _ReadyRecordingInspector(),
+      client: MockClient((request) async {
+        requestWasSent = true;
+        return http.Response('{}', 500);
+      }),
+    );
+
+    await expectLater(
+      uploader.upload(
+        call: CallModel(
+          sessionId: 'call-user-mismatch',
+          phoneNumber: '0755962582',
+          callType: 'outgoing',
+          duration: 17,
+          audioPath: recording.path,
+          status: 'pending',
+          createdAt: '2026-07-24T13:00:20.000',
+        ),
+        customerId: 'CUST-001',
+        agentEmail: 'agent@example.com',
+      ),
+      throwsA(
+        isA<RecordingUploadException>().having(
+          (error) => error.message,
+          'message',
+          contains('do not belong'),
+        ),
+      ),
+    );
+    expect(requestWasSent, isFalse);
   });
 
   test(

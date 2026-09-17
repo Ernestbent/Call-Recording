@@ -89,7 +89,7 @@ class CallController with WidgetsBindingObserver {
         sessionManager.onCallStart(number);
         debugPrint('   ✅ SessionManager notified');
 
-        customerCallStore.markCallStarted(
+        await customerCallStore.markCallStarted(
           resolvedPhoneNumber,
           startedAt: callStartedAt,
         );
@@ -160,6 +160,7 @@ class CallController with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       unawaited(customerCallStore.reconcileCompletedBackgroundCalls());
+      unawaited(customerCallStore.refreshDraftPaymentCustomersIfStale());
     }
   }
 
